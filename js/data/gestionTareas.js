@@ -20,7 +20,13 @@ function aArray(valor) {
 function normalizarTarea(f) {
     const subitems = aArray(f.subitems);
     return {
-        id: f.id,
+        // String SIEMPRE — la Sheet puede devolver el id como number
+        // (ej. el Date.now() con el que se creó) y el resto de la app
+        // lo usa como string (data-tarea-id en el HTML, siempre string
+        // al leerlo de vuelta) — un Map.get() con el tipo que no
+        // coincide falla en silencio, no tira error. Mismo bug real
+        // que ya se ve en otros lados con comparaciones de id.
+        id: String(f.id),
         icono: f.icono || "documento",
         titulo: f.titulo || "",
         detalle: f.detalle || "",

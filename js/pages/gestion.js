@@ -776,6 +776,7 @@ function bindEnviarPush(boton) {
         const completa = subitems.length ? subitems.every((s) => s.checked) : !!checkPropio?.checked;
 
         const textoOriginal = boton.textContent;
+        let enviado = false;
         boton.disabled = true;
         boton.textContent = "Enviando...";
         try {
@@ -806,10 +807,19 @@ function bindEnviarPush(boton) {
                 ? "Aviso desde Gestión semanal."
                 : completa ? "Tarea completa ✅" : "Tarea incompleta ⚠️ — revisá qué falta en la app.";
             const r = await mandarPush(Array.from(destinatarios), tarea.titulo, cuerpo, "#/gestion");
-            if (!r?.ok) alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
+            if (!r?.ok) {
+                alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
+                return;
+            }
+            // Confirmación visible de que SÍ salió — antes quedaba
+            // mudo en el caso de éxito, indistinguible de "no hizo
+            // nada" (pedido explícito: "no se sabe si se envió").
+            enviado = true;
+            boton.textContent = "✓ Enviado";
+            setTimeout(() => { boton.textContent = textoOriginal; }, 2000);
         } finally {
             boton.disabled = false;
-            boton.textContent = textoOriginal;
+            if (!enviado) boton.textContent = textoOriginal;
         }
     });
 }
