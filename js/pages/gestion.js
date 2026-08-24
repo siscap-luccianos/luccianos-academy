@@ -11,11 +11,16 @@
                        "Próximamente" — sin inventar contenido.
      2. Gestión semanal — el checklist tipo calendario, por día
                        (arranca Domingo — más actividad, se cuenta
-                       para recibir el lunes). Las tareas semanales
-                       tienen un selector de "Día" propio, reasignable
-                       sin tocar código. Check LOCAL (no se guarda, se
-                       resetea al recargar) solo para que la
-                       interacción se sienta real.
+                       para recibir el lunes). Cada tarea tiene una o
+                       más "dias" (ej. depósitos: Lunes Y Viernes) —
+                       las pills de la propia tarjeta la mueven entre
+                       días sin tocar código. Antes de ver los días,
+                       la pestaña "Tareas" es donde el local elige qué
+                       le corresponde — TODO arranca destildado
+                       (tareasAplicables vacío): lo que no se marca ahí
+                       no aparece en ningún día. Check LOCAL (no se
+                       guarda, se resetea al recargar) solo para que
+                       la interacción se sienta real.
      3. ¿Qué hago si...? — guía situacional. Estructura fija por
                        situación (Qué hacer / Qué NO hacer / Cuándo
                        escalar / Herramienta relacionada), TODAS
@@ -63,49 +68,49 @@ function temaFormacionHtml(t) {
 }
 
 /* ============================
-   2. Gestión semanal — el checklist, ahora por día
+   2. Gestión semanal — el checklist, por día
 
    La semana arranca DOMINGO a propósito (pedido explícito): es el día
    de más actividad — ahí se cuenta para que el lunes entren los
-   pedidos. "dia" en cada tarea semanal es solo el punto de partida,
-   no algo fijo — el selector "Día" de cada tarjeta la mueve al
-   momento, sin tocar código (mismo espíritu que "+ Agregar ítem").
+   pedidos.
+
+   Cada tarea tiene un array "dias" (uno, varios, o los 7 — "todos los
+   días" no es un caso especial, es simplemente los 7 marcados). Las
+   pills Do/Lu/Ma/.../Sá de la propia tarjeta prenden/apagan días al
+   momento, sin tocar código — mismo espíritu que "+ Agregar ítem".
 =============================*/
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-// Aparecen los 7 días, cada día con SU PROPIO check — limpiar el
-// abatidor el lunes no debería dar por hecha la limpieza del martes.
-const TAREAS_DIARIAS = [
-    { id: "diaria-control", icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto." },
+const TAREAS = [
+    { id: "diaria-control", icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto.", dias: [...DIAS] },
     {
-        id: "diaria-limpieza", icono: "tacho",
-        titulo: "Limpieza del equipamiento",
-        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.",
+        id: "diaria-limpieza", icono: "tacho", titulo: "Limpieza del equipamiento",
+        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.", dias: [...DIAS],
         subitems: ["Abatidor", "Armario", "Vitrina"],
     },
-];
-
-// Un día de referencia cada una — reasignable con el selector de la
-// propia tarjeta.
-const TAREAS_SEMANALES = [
-    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dia: "Domingo" },
+    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dias: ["Domingo"] },
     {
         id: "proveedores", icono: "caja", titulo: "Pedido a proveedores",
-        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dia: "Domingo",
+        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dias: ["Domingo"],
         subitems: ["Leche", "Crema", "Dore", "Barcena", "Limpieza", "Pastelería", "Rollos fiscales", "Posnet"],
     },
-    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dia: "Domingo" },
-    // Pedido explícito: se sacó la categoría "Cuando lo pidan" — toda
-    // tarea entra al ciclo semanal, ésta arranca Domingo como el
-    // resto y se reasigna con el mismo selector de Día si hace falta.
-    { id: "reportes", icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración.", dia: "Domingo" },
+    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dias: ["Domingo"] },
+    { id: "reportes", icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración.", dias: ["Domingo"] },
 ];
 
-/** id → { tipo, tarea } de TODAS las tareas vivas — única fuente de
- *  verdad para "Editar" (prellenar el form con los datos reales, no
- *  adivinarlos leyendo el DOM). Se puebla al renderizar (Gestion()) y
- *  se actualiza en cada alta/baja. */
+/** id → tarea real de TODAS las tareas vivas — única fuente de verdad
+ *  para "Editar" y para las pills de día (prellenar/leer datos reales,
+ *  no adivinarlos leyendo el DOM). Se puebla al renderizar (Gestion())
+ *  y se actualiza en cada alta/baja/cambio de día. */
 const registroTareas = new Map();
+
+/** Qué tareas aplican a ESTE local — pedido explícito: "una pill que
+ *  diga Tareas y cada local elige las que le corresponden, las que no
+ *  selecciona quedan descartadas por defecto". Arranca VACÍO a
+ *  propósito (nada visible en los días hasta que se elige en la
+ *  pestaña "Tareas") — reemplaza el "Ocultar" anterior: un solo
+ *  interruptor por tarea en vez de tener que ocultarla día por día. */
+const tareasAplicables = new Set();
 
 const ICONOS_TAREA = [
     { valor: "documento", label: "Documento" },
@@ -120,37 +125,58 @@ const ICONOS_TAREA = [
 
 let contadorTareaNueva = 0;
 
-function selectorDiaHtml(t) {
+/** Pedido explícito: "que el selector de días me permita poner más de
+ *  un día — los depósitos se hacen lunes y viernes". Pills, no un
+ *  <select multiple> (mal en celular) — cada una prende/apaga un día,
+ *  siempre visibles, sin abrir ningún modal. */
+function diasControlHtml(t) {
     return `
         <div class="tarea-gestion-dia-control">
-            <label>Día
-                <select class="select-dia-tarea">
-                    ${DIAS.map((d) => `<option value="${d}"${d === t.dia ? " selected" : ""}>${d}</option>`).join("")}
-                </select>
-            </label>
+            <span class="tarea-gestion-dia-label">Días</span>
+            <div class="dias-pills-tarea">
+                ${DIAS.map((d) => `<button type="button" class="pill-dia-tarea${t.dias.includes(d) ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${d.slice(0, 2)}</button>`).join("")}
+            </div>
         </div>
     `;
 }
 
-/** Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin,
+/** Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin),
  *  mismos íconos/estilo que ya usa el modal de Publicación:
- *  .publicacion-accion-icono) y "Ocultar para mi local" (cualquiera,
- *  no borra nada, solo su propia vista — ver bindOcultarTarea). */
+ *  .publicacion-accion-icono. Elegir SI la tarea aplica al local vive
+ *  en la pestaña "Tareas" (aplicaTareaHtml), no acá. */
 function accionesTareaHtml() {
     return `
         <div class="tarea-gestion-acciones">
             <button type="button" class="publicacion-accion-icono" data-editar-tarea title="Editar tarea" aria-label="Editar tarea">${Icon("lapiz", { size: 15 })}</button>
             <button type="button" class="publicacion-accion-icono publicacion-accion-icono-danger" data-eliminar-tarea title="Eliminar tarea" aria-label="Eliminar tarea">${Icon("tacho", { size: 15 })}</button>
-            <button type="button" class="btn-ocultar-tarea" data-ocultar-tarea>Ocultar para mi local</button>
         </div>
     `;
 }
 
-function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
+/** Fila de la pestaña "Tareas" — el checklist plano donde el local
+ *  elige qué le corresponde. Sin días ni sub-ítems acá, solo "esto
+ *  aplica sí/no" + cuándo pasa (para reconocerla sin tener que
+ *  adivinar). Arranca destildada — "las que no selecciona quedan
+ *  descartadas por defecto". */
+function aplicaTareaHtml(t) {
+    return `
+        <label class="fila-aplica-tarea" for="aplica-${t.id}">
+            <input type="checkbox" id="aplica-${t.id}" class="check-aplica-tarea" data-tarea-id="${t.id}"${tareasAplicables.has(t.id) ? " checked" : ""}>
+            <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
+            <span class="tarea-gestion-txt">
+                <strong>${t.titulo}</strong>
+                <span>${t.detalle}</span>
+            </span>
+            <span class="fila-aplica-tarea-dias">${t.dias.length === 7 ? "Todos los días" : t.dias.join(", ")}</span>
+        </label>
+    `;
+}
+
+function tareaHtml(t, idUnico) {
     const id = `tarea-${idUnico}`;
-    // data-tarea-id va SIEMPRE (no solo semanales) — es la identidad
-    // que usan Editar/Eliminar para encontrar la tarjeta (o las 7
-    // copias, si es diaria) sin importar en qué panel esté.
+    // data-tarea-id va en TODAS las tarjetas — es la identidad que usa
+    // Editar/Eliminar/pills-de-día para encontrar todas las copias de
+    // esta tarea (una por cada día en t.dias) sin importar el panel.
     const atrId = ` data-tarea-id="${t.id}"`;
 
     if (t.subitems) {
@@ -177,17 +203,14 @@ function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
                         <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
                     </div>
                 </div>
-                ${esSemanal ? selectorDiaHtml(t) : ""}
+                ${diasControlHtml(t)}
                 ${accionesTareaHtml()}
             </div>
         `;
     }
 
-    // Tareas simples (sin sub-ítems) van SIEMPRE en un div envolvente
-    // — no solo cuando son semanales — para poder colgarles Editar/
-    // Eliminar/Ocultar igual que a las desplegables.
     return `
-        <div class="tarea-gestion${esSemanal ? " tarea-gestion-simple-semanal" : " tarea-gestion-simple"}"${atrId}>
+        <div class="tarea-gestion tarea-gestion-simple"${atrId}>
             <label class="tarea-gestion-label" for="${id}">
                 <input type="checkbox" id="${id}" class="tarea-gestion-check">
                 <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
@@ -196,17 +219,18 @@ function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
                     <span>${t.detalle}</span>
                 </span>
             </label>
-            ${esSemanal ? selectorDiaHtml(t) : ""}
+            ${diasControlHtml(t)}
             ${accionesTareaHtml()}
         </div>
     `;
 }
 
-/* ── "+ Nueva tarea" (admin) ─────────────────────────────────────
+/* ── "+ Nueva tarea" / "Editar tarea" (admin) ────────────────────
    Pedido explícito: mismo patrón que ya existe en Lecciones — un
    encabezado (ej. "Inventario") y abajo sub-tareas sueltas ("No te
    olvides de imprimir la planilla", "No te olvides de la lapicera").
-   El día se elige DESPUÉS, como último paso, no antes. */
+   Los días se eligen con checkboxes reales (contenido-sin-errores:
+   una fila por ítem, no un <select multiple>). */
 function subtareaNuevaFilaHtml(texto = "") {
     return `
         <div class="subtarea-nueva-fila">
@@ -217,12 +241,9 @@ function subtareaNuevaFilaHtml(texto = "") {
 }
 
 /** Mismo form para crear Y editar — si viene `tarea` precarga sus
- *  valores reales (sacados de registroTareas, no adivinados del DOM).
- *  Solo dos repeticiones: diaria (todos los días) o semanal (un día,
- *  reasignable siempre) — se sacó "cuando lo pidan" a pedido. */
-function contenidoModalTarea({ tipo, tarea } = {}) {
-    const frecuenciaInicial = tipo === "diaria" ? "diaria" : "semanal";
-    const diaInicial = tarea?.dia || "Domingo";
+ *  valores reales (sacados de registroTareas, no adivinados del DOM). */
+function contenidoModalTarea({ tarea } = {}) {
+    const diasSel = tarea?.dias || ["Domingo"];
     return `
         <label>Título
             <textarea id="input-tarea-titulo" rows="1" placeholder="Ej: Inventario">${escaparHtml(tarea?.titulo || "")}</textarea>
@@ -235,17 +256,20 @@ function contenidoModalTarea({ tipo, tarea } = {}) {
                 ${ICONOS_TAREA.map((i) => `<option value="${i.valor}"${i.valor === tarea?.icono ? " selected" : ""}>${i.label}</option>`).join("")}
             </select>
         </label>
-        <label>Repetición
-            <select id="input-tarea-frecuencia">
-                <option value="semanal"${frecuenciaInicial === "semanal" ? " selected" : ""}>Un día específico</option>
-                <option value="diaria"${frecuenciaInicial === "diaria" ? " selected" : ""}>Todos los días</option>
-            </select>
-        </label>
-        <label id="campo-tarea-dia">Día
-            <select id="input-tarea-dia">
-                ${DIAS.map((d) => `<option value="${d}"${d === diaInicial ? " selected" : ""}>${d}</option>`).join("")}
-            </select>
-        </label>
+        <div class="campo-dias-modal">
+            <div class="campo-dias-modal-header">
+                <span>Días</span>
+                <button type="button" id="btn-todos-los-dias-modal">Marcar todos</button>
+            </div>
+            <div class="dias-checkbox-grid">
+                ${DIAS.map((d) => `
+                    <label class="dia-checkbox-fila">
+                        <input type="checkbox" class="check-dia-tarea" value="${d}"${diasSel.includes(d) ? " checked" : ""}>
+                        <span>${d}</span>
+                    </label>
+                `).join("")}
+            </div>
+        </div>
         <label class="campo-subtareas-nueva">Sub-tareas (opcional)
             <div id="lista-subtareas-nueva">${(tarea?.subitems || []).map(subtareaNuevaFilaHtml).join("")}</div>
             <button type="button" class="btn-agregar-subtarea-nueva" id="btn-agregar-subtarea-nueva">+ Agregar sub-tarea</button>
@@ -255,111 +279,102 @@ function contenidoModalTarea({ tipo, tarea } = {}) {
 
 function bindModalTarea() {
     const listaSubtareas = document.getElementById("lista-subtareas-nueva");
-    const selectFrecuencia = document.getElementById("input-tarea-frecuencia");
-    const campoDia = document.getElementById("campo-tarea-dia");
 
-    function actualizarVisibilidadDia() {
-        campoDia.style.display = selectFrecuencia.value === "semanal" ? "" : "none";
-    }
-    selectFrecuencia.addEventListener("change", actualizarVisibilidadDia);
-    actualizarVisibilidadDia();
-
-    function agregarFilaSubtarea() {
+    document.getElementById("btn-agregar-subtarea-nueva").addEventListener("click", () => {
         listaSubtareas.insertAdjacentHTML("beforeend", subtareaNuevaFilaHtml());
-    }
-    document.getElementById("btn-agregar-subtarea-nueva").addEventListener("click", agregarFilaSubtarea);
+    });
 
     listaSubtareas.addEventListener("click", (e) => {
         if (e.target.classList.contains("btn-quitar-subtarea-nueva")) {
             e.target.closest(".subtarea-nueva-fila").remove();
         }
     });
+
+    // "Marcar todos" — atajo para el caso "todos los días", sin tener
+    // que tildar las 7 a mano. Si ya estaban todas tildadas, destilda
+    // todas (toggle), no queda pegado en un solo sentido.
+    const checksDias = Array.from(document.querySelectorAll(".check-dia-tarea"));
+    document.getElementById("btn-todos-los-dias-modal").addEventListener("click", () => {
+        const todosMarcados = checksDias.every((c) => c.checked);
+        checksDias.forEach((c) => { c.checked = !todosMarcados; });
+    });
 }
 
-/** Arma la tarea desde el form y la inserta en el/los panel(es) que
- *  correspondan. Si `idEditado` viene con valor, primero saca TODAS
- *  las copias viejas de esa tarea (hasta 7, si era diaria) — así
- *  cambiar de "Todos los días" a "Un día específico" (o al revés)
- *  simplemente la recrea donde corresponda, sin dejar copias
- *  huérfanas. Devuelve los nodos insertados (para reengancharles los
- *  listeners) o null si faltó el título (ya avisado con alert). */
+/** Reconstruye en el DOM TODAS las copias de una tarea (una por cada
+ *  día en su .dias actual) a partir de lo que hay en registroTareas —
+ *  saca las copias viejas primero. La usan tanto "Guardar" del modal
+ *  como las pills de día de la propia tarjeta (bindDiasControl), así
+ *  el mismo mecanismo cubre los dos caminos de cambiar el día. */
+function recrearTareaEnPaneles(idTarea) {
+    const tarea = registroTareas.get(idTarea);
+    if (!tarea) return;
+    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
+    if (!tareasAplicables.has(idTarea)) return; // no aplica a este local — no se dibuja en ningún día
+    tarea.dias.forEach((d) => {
+        const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
+        if (!lista) return;
+        lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`));
+        bindTarjetaNueva(lista.lastElementChild);
+    });
+}
+
+/** Lee el form, valida (título + al menos un día) y guarda — crea un
+ *  id nuevo o reusa `idEditado` si es una edición. Devuelve true/false
+ *  según si pudo guardar (false = validación falló, ya avisada con
+ *  alert, el modal se queda abierto para corregir). */
 function confirmarTarea(idEditado = null) {
     const titulo = document.getElementById("input-tarea-titulo").value.trim();
     if (!titulo) {
         alert("Ponele un título a la tarea antes de guardar.");
-        return null;
+        return false;
+    }
+    const dias = Array.from(document.querySelectorAll(".check-dia-tarea:checked")).map((c) => c.value);
+    if (!dias.length) {
+        alert("Elegí al menos un día para la tarea.");
+        return false;
     }
     const detalle = document.getElementById("input-tarea-detalle").value.trim();
     const icono = document.getElementById("input-tarea-icono").value;
-    const frecuencia = document.getElementById("input-tarea-frecuencia").value;
-    const dia = document.getElementById("input-tarea-dia").value;
     const subitems = Array.from(document.querySelectorAll(".input-subtarea-nueva-texto"))
         .map((t) => t.value.trim())
         .filter(Boolean);
 
     let id = idEditado;
-    if (id) {
-        document.querySelectorAll(`[data-tarea-id="${id}"]`).forEach((n) => n.remove());
-        [TAREAS_DIARIAS, TAREAS_SEMANALES].forEach((arr) => {
-            const i = arr.findIndex((t) => t.id === id);
-            if (i !== -1) arr.splice(i, 1);
-        });
-    } else {
+    if (!id) {
         contadorTareaNueva += 1;
         id = `nueva-${contadorTareaNueva}`;
     }
 
-    const base = { id, icono, titulo, detalle, ...(subitems.length ? { subitems } : {}) };
-    const nodosInsertados = [];
-
-    if (frecuencia === "diaria") {
-        TAREAS_DIARIAS.push(base);
-        DIAS.forEach((d) => {
-            const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
-            if (!lista) return;
-            lista.insertAdjacentHTML("beforeend", tareaHtml(base, `${id}-${d}`));
-            nodosInsertados.push(lista.lastElementChild);
-        });
-        registroTareas.set(id, { tipo: "diaria", tarea: base });
-    } else {
-        const tarea = { ...base, dia };
-        TAREAS_SEMANALES.push(tarea);
-        const lista = document.querySelector(`[data-panel-dia="${dia}"] .lista-tareas-gestion`);
-        lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, id, { esSemanal: true }));
-        nodosInsertados.push(lista.lastElementChild);
-        registroTareas.set(id, { tipo: "semanal", tarea });
-    }
-
-    return nodosInsertados;
+    registroTareas.set(id, { id, icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) });
+    // Recién creada/editada por vos ahora mismo — que se vea al toque,
+    // no que se pierda en "Tareas" hasta acordarse de tildarla.
+    tareasAplicables.add(id);
+    recrearTareaEnPaneles(id);
+    actualizarFilaAplica(id);
+    return true;
 }
 
 /** Elimina TODAS las copias de una tarea (Admin) — pide confirmación
  *  explícita, mismo patrón que ya usan Locales/Manuales/Colaboradores
  *  (confirm() con el nombre de lo que se borra). */
 function eliminarTarea(idTarea) {
-    const entrada = registroTareas.get(idTarea);
-    const nombre = entrada?.tarea?.titulo || "esta tarea";
-    if (!confirm(`¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`)) return;
-    document.querySelectorAll(`[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
-    [TAREAS_DIARIAS, TAREAS_SEMANALES].forEach((arr) => {
-        const i = arr.findIndex((t) => t.id === idTarea);
-        if (i !== -1) arr.splice(i, 1);
-    });
+    const tarea = registroTareas.get(idTarea);
+    if (!confirm(`¿Eliminar "${tarea?.titulo || "esta tarea"}"? Esta acción no se puede deshacer.`)) return;
+    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
+    document.querySelector(`.fila-aplica-tarea[for="aplica-${idTarea}"]`)?.remove();
     registroTareas.delete(idTarea);
-    actualizarContadorOcultas();
+    tareasAplicables.delete(idTarea);
 }
 
 /** Abre el modal de tarea — sin argumentos, "+ Nueva tarea"; con
- *  `idEditado` + `tipo` + `tarea`, "Editar" precargado. */
-function abrirModalTarea({ idEditado = null, tipo = null, tarea = null } = {}) {
+ *  `idEditado` + `tarea`, "Editar" precargado. */
+function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
     const idModal = "modal-tarea";
     abrirModal(
-        Modal({ id: idModal, titulo: idEditado ? "Editar tarea" : "Nueva tarea", contenidoHtml: contenidoModalTarea({ tipo, tarea }), textoConfirmar: "Guardar" }),
+        Modal({ id: idModal, titulo: idEditado ? "Editar tarea" : "Nueva tarea", contenidoHtml: contenidoModalTarea({ tarea }), textoConfirmar: "Guardar" }),
         idModal,
         () => {
-            const nodos = confirmarTarea(idEditado);
-            if (!nodos) return; // faltó el título, el modal se queda abierto para corregir
-            nodos.forEach(bindTarjetaNueva);
+            if (!confirmarTarea(idEditado)) return;
             cerrarModal(idModal);
         },
     );
@@ -428,12 +443,11 @@ const TABS = [
 ];
 
 export async function Gestion() {
-    // Puebla el registro (id → tarea real) con lo que arranca
-    // cargado — así "Editar" tiene de dónde prellenar desde el
-    // primer render, no solo para lo creado después.
+    // Puebla el registro (id → tarea real) con lo que arranca cargado
+    // — así "Editar" y las pills de día tienen de dónde leer/escribir
+    // desde el primer render, no solo para lo creado después.
     registroTareas.clear();
-    TAREAS_DIARIAS.forEach((t) => registroTareas.set(t.id, { tipo: "diaria", tarea: t }));
-    TAREAS_SEMANALES.forEach((t) => registroTareas.set(t.id, { tipo: "semanal", tarea: t }));
+    TAREAS.forEach((t) => registroTareas.set(t.id, t));
 
     return `
         ${Header("Responsables de Local y Turno", "Responsable de local y responsable de turno")}
@@ -466,22 +480,30 @@ export async function Gestion() {
             </div>
 
             <div class="tabs-gestion" id="tabs-dias-gestion">
-                ${DIAS.map((d, i) => `<button class="tab-gestion${i === 0 ? " activa" : ""}" data-vista-dia="${d}">${d}</button>`).join("")}
+                <button class="tab-gestion activa" data-vista-dia="tareas">Tareas</button>
+                ${DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")}
             </div>
 
-            <details class="drawer-tareas-ocultas">
-                <summary>Tareas ocultas para mi local (<span data-contador-ocultas>0</span>)</summary>
-                <div class="lista-tareas-gestion" id="tareas-ocultas-lista"></div>
-            </details>
+            <!-- "Tareas": el local elige qué le corresponde — arranca
+                 todo destildado, "las que no selecciona quedan
+                 descartadas por defecto" (pedido explícito). Vive
+                 FUERA de #contenido-gestion-imprimible: es
+                 configuración, no algo que se exporte en el PDF del
+                 día. -->
+            <div class="section" data-panel-dia="tareas">
+                <p class="aviso-tareas-aplicables">Elegí qué tareas te corresponden — las que no marques no van a aparecer en ningún día.</p>
+                <div class="lista-tareas-gestion" id="lista-aplica-tareas">
+                    ${TAREAS.map(aplicaTareaHtml).join("")}
+                </div>
+            </div>
 
             <div id="contenido-gestion-imprimible">
                 ${membreteHtml("Guía de Gestión")}
-                ${DIAS.map((d, i) => `
-                    <div class="section" data-panel-dia="${d}" style="${i === 0 ? "" : "display:none"}">
+                ${DIAS.map((d) => `
+                    <div class="section" data-panel-dia="${d}" style="display:none">
                         <h3>${d}</h3>
                         <div class="lista-tareas-gestion">
-                            ${TAREAS_DIARIAS.map((t) => tareaHtml(t, `${t.id}-${d}`)).join("")}
-                            ${TAREAS_SEMANALES.filter((t) => t.dia === d).map((t) => tareaHtml(t, t.id, { esSemanal: true })).join("")}
+                            ${TAREAS.filter((t) => t.dias.includes(d) && tareasAplicables.has(t.id)).map((t) => tareaHtml(t, `${t.id}-${d}`)).join("")}
                         </div>
                     </div>
                 `).join("")}
@@ -500,9 +522,8 @@ export async function Gestion() {
 
 // ── Funciones de bind reutilizables ──────────────────────────────
 // Se usan tanto en la carga inicial de la página como en una tarea
-// recién creada con "+ Nueva tarea" — así una tarjeta nueva se
-// comporta EXACTAMENTE igual que las que ya vinieron armadas, sin
-// duplicar la lógica en dos lugares.
+// recién creada/editada/movida de día — así una tarjeta siempre se
+// comporta igual, sin duplicar la lógica en dos lugares.
 
 function bindCheckboxHecha(chk) {
     chk.addEventListener("change", () => {
@@ -510,19 +531,23 @@ function bindCheckboxHecha(chk) {
     });
 }
 
-/** Mueve la tarjeta ENTERA (no la recrea) al panel del día elegido —
- *  no pierde su estado de tildado/desplegado. Pedido explícito:
- *  control propio sobre el día, sin depender de un pedido de código
- *  cada vez. */
-function bindSelectorDia(select) {
-    select.addEventListener("change", () => {
-        const tarea = select.closest(".tarea-gestion");
-        const listaDestino = document.querySelector(`[data-panel-dia="${select.value}"] .lista-tareas-gestion`);
-        if (!tarea || !listaDestino) return;
-        listaDestino.appendChild(tarea);
-        document.querySelector(`#tabs-dias-gestion [data-vista-dia="${select.value}"]`)?.click();
-        const entrada = registroTareas.get(tarea.dataset.tareaId);
-        if (entrada) entrada.tarea.dia = select.value; // el registro tiene que reflejar el día real para cuando se abra "Editar"
+/** Pills Do/Lu/Ma/.../Sá de la propia tarjeta — tocar una prende/apaga
+ *  ESE día para la tarea (no reemplaza el resto, los suma/saca). No
+ *  deja quedar la tarea sin ningún día. Reconstruye las copias con
+ *  recrearTareaEnPaneles (mismo camino que "Guardar" del modal). */
+function bindDiasControl(contenedor) {
+    contenedor.querySelectorAll("[data-toggle-dia]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const idTarea = contenedor.closest(".tarea-gestion").dataset.tareaId;
+            const tarea = registroTareas.get(idTarea);
+            if (!tarea) return;
+            const dia = btn.dataset.toggleDia;
+            const idx = tarea.dias.indexOf(dia);
+            if (idx !== -1 && tarea.dias.length === 1) return; // no puede quedar sin ningún día
+            if (idx === -1) tarea.dias.push(dia); else tarea.dias.splice(idx, 1);
+            recrearTareaEnPaneles(idTarea);
+            document.querySelector(`#tabs-dias-gestion [data-vista-dia="${dia}"]`)?.click();
+        });
     });
 }
 
@@ -586,39 +611,36 @@ function bindTarjetaDesplegable(tarjeta) {
     });
 }
 
-function actualizarContadorOcultas() {
-    const contador = document.querySelector("[data-contador-ocultas]");
-    const lista = document.getElementById("tareas-ocultas-lista");
-    if (contador && lista) contador.textContent = lista.children.length;
+/** Sincroniza la fila de la pestaña "Tareas" con lo que se acaba de
+ *  crear/editar — la vuelve a dibujar si ya existía (título/detalle/
+ *  días pueden haber cambiado) o la agrega si es una tarea nueva. */
+function actualizarFilaAplica(idTarea) {
+    const tarea = registroTareas.get(idTarea);
+    if (!tarea) return;
+    const filaVieja = document.querySelector(`.fila-aplica-tarea[for="aplica-${idTarea}"]`);
+    if (filaVieja) filaVieja.outerHTML = aplicaTareaHtml(tarea);
+    else document.getElementById("lista-aplica-tareas")?.insertAdjacentHTML("beforeend", aplicaTareaHtml(tarea));
+    const chk = document.getElementById(`aplica-${idTarea}`);
+    if (chk) bindAplicaTarea(chk);
 }
 
-/** "Ocultar para mi local" / "Mostrar de nuevo" — un solo botón que
- *  alterna: mueve la tarjeta ENTERA al cajón (o de vuelta a donde
- *  estaba, guardado en data-origen-panel). No borra nada — el
- *  contenido maestro no se toca, solo la vista de este local. */
-function bindOcultarTarea(boton) {
-    boton.addEventListener("click", () => {
-        const tarjeta = boton.closest(".tarea-gestion");
-        const yaOculta = tarjeta.classList.toggle("tarea-oculta-local");
-        if (yaOculta) {
-            const panelActual = tarjeta.closest("[data-panel-dia]");
-            tarjeta.dataset.origenPanel = panelActual ? panelActual.dataset.panelDia : "";
-            document.getElementById("tareas-ocultas-lista").appendChild(tarjeta);
-            boton.textContent = "Mostrar de nuevo";
-        } else {
-            const listaDestino = document.querySelector(`[data-panel-dia="${tarjeta.dataset.origenPanel}"] .lista-tareas-gestion`);
-            (listaDestino || document.querySelector(".lista-tareas-gestion"))?.appendChild(tarjeta);
-            boton.textContent = "Ocultar para mi local";
-        }
-        actualizarContadorOcultas();
+/** Pestaña "Tareas" — el interruptor real de "esto le corresponde a
+ *  mi local sí/no". Tildar/destildar prende/apaga la tarea en TODOS
+ *  sus días de una — no hay que ir día por día como antes. */
+function bindAplicaTarea(chk) {
+    chk.addEventListener("change", () => {
+        const idTarea = chk.dataset.tareaId;
+        if (chk.checked) tareasAplicables.add(idTarea);
+        else tareasAplicables.delete(idTarea);
+        recrearTareaEnPaneles(idTarea);
     });
 }
 
 function bindEditarTarea(boton) {
     boton.addEventListener("click", () => {
         const idTarea = boton.closest(".tarea-gestion").dataset.tareaId;
-        const entrada = registroTareas.get(idTarea);
-        if (entrada) abrirModalTarea({ idEditado: idTarea, tipo: entrada.tipo, tarea: entrada.tarea });
+        const tarea = registroTareas.get(idTarea);
+        if (tarea) abrirModalTarea({ idEditado: idTarea, tarea });
     });
 }
 
@@ -628,14 +650,12 @@ function bindEliminarTarea(boton) {
     });
 }
 
-/** Le engancha a un nodo recién insertado (una tarjeta entera, la
- *  devuelta por confirmarTarea) todo lo que le corresponda según su
- *  forma — mismo resultado que si hubiera venido en el render
- *  inicial. */
+/** Le engancha a un nodo (recién insertado por confirmarTarea o
+ *  recrearTareaEnPaneles) todo lo que le corresponda según su forma —
+ *  mismo resultado que si hubiera venido en el render inicial. */
 function bindTarjetaNueva(nodo) {
     nodo.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
-    nodo.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
-    nodo.querySelectorAll("[data-ocultar-tarea]").forEach(bindOcultarTarea);
+    nodo.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
     nodo.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     nodo.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
     if (nodo.matches("[data-desplegable]")) bindTarjetaDesplegable(nodo);
@@ -670,16 +690,16 @@ export function bindGestion() {
         });
     });
 
-    document.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
     document.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
+    document.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
     document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
-    document.querySelectorAll("[data-ocultar-tarea]").forEach(bindOcultarTarea);
+    document.querySelectorAll(".check-aplica-tarea").forEach(bindAplicaTarea);
     document.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     document.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
 
     // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
-    // Lecciones: encabezado + sub-tareas sueltas, el día se elige al
-    // final.
+    // Lecciones: encabezado + sub-tareas sueltas, los días se eligen
+    // con checkboxes.
     document.getElementById("btn-nueva-tarea")?.addEventListener("click", () => abrirModalTarea());
 
     // "Exportar a PDF" — solo la Gestión semanal (es la única parte

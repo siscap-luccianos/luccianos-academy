@@ -5517,43 +5517,53 @@ table.data-table tbody tr:hover{
     font-style:italic;
 }
 
-/* Selector "Día" en tareas semanales — vos reasignás el día de una
-   tarea sin pedir un cambio de código. */
+/* Pills Do/Lu/Ma/.../Sá en cada tarjeta — pedido explícito: una tarea
+   puede tener MÁS de un día ("los depósitos se hacen lunes y
+   viernes"), así que nada de <select> de uno solo. Cada pill prende/
+   apaga ESE día para la tarea sin abrir ningún modal. */
 .tarea-gestion-dia-control{
     padding:10px 18px 14px;
     border-top:1px solid var(--line);
 }
 
-.tarea-gestion-dia-control label{
-    display:flex;
-    align-items:center;
-    gap:8px;
+.tarea-gestion-dia-label{
+    display:block;
     font-size:11.5px;
     color:var(--muted);
     text-transform:uppercase;
     letter-spacing:.03em;
     font-weight:700;
+    margin-bottom:8px;
 }
 
-.select-dia-tarea{
-    padding:6px 10px;
+.dias-pills-tarea{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+}
+
+.pill-dia-tarea{
+    padding:5px 10px;
     background:var(--soft);
     border:1px solid var(--line);
-    border-radius:var(--radius-sm);
-    color:var(--text);
-    font-size:13px;
-    text-transform:none;
-    letter-spacing:normal;
-    font-weight:500;
+    border-radius:999px;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:700;
     cursor:pointer;
+    transition:var(--transition);
 }
-.select-dia-tarea:focus{ outline:none; border-color:var(--gold); }
+.pill-dia-tarea:hover{ border-color:var(--gold); }
+.pill-dia-tarea.activa{
+    background:var(--gold);
+    color:var(--black);
+    border-color:var(--gold);
+}
 
-/* Tarea semanal simple (sin sub-ítems) con selector de día — en
-   columna, para dejar lugar al selector debajo de la fila principal.
-   Misma especificidad "dos clases" que .tarea-gestion-desplegable
-   para pisarle el display:flex de fila sin duplicar el resto. */
-.tarea-gestion.tarea-gestion-simple-semanal,
+/* Tarea simple (sin sub-ítems) — en columna, para dejar lugar a las
+   pills de día debajo de la fila principal. Misma especificidad "dos
+   clases" que .tarea-gestion-desplegable para pisarle el display:flex
+   de fila sin duplicar el resto. */
 .tarea-gestion.tarea-gestion-simple{
     display:flex;
     flex-direction:column;
@@ -5617,10 +5627,9 @@ table.data-table tbody tr:hover{
     padding:4px 0;
 }
 
-/* Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin,
-   íconos, mismo estilo que .publicacion-accion-icono) a la izquierda,
-   "Ocultar para mi local" (cualquiera) a la derecha. Visible en TODAS
-   las tarjetas, no solo las semanales. */
+/* Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin),
+   mismos íconos/estilo que ya usa el modal de Publicación
+   (.publicacion-accion-icono). */
 .tarea-gestion-acciones{
     display:flex;
     align-items:center;
@@ -5634,40 +5643,84 @@ table.data-table tbody tr:hover{
     height:30px;
 }
 
-.btn-ocultar-tarea{
-    margin-left:auto;
+/* Pestaña "Tareas" — el checklist plano donde el local elige qué le
+   corresponde. Arranca todo destildado a propósito. */
+.aviso-tareas-aplicables{
+    margin:0 0 14px;
+    font-size:13px;
+    color:var(--muted);
+}
+
+.fila-aplica-tarea{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:14px 18px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius-sm);
+    cursor:pointer;
+    transition:var(--transition);
+}
+.fila-aplica-tarea:hover{ border-color:var(--gold); }
+
+.check-aplica-tarea{
+    flex-shrink:0;
+    width:20px;
+    height:20px;
+    accent-color:var(--gold);
+}
+
+.fila-aplica-tarea-dias{
+    flex-shrink:0;
+    font-size:12px;
+    color:var(--muted);
+    text-align:right;
+    max-width:120px;
+}
+
+/* Checkboxes de "Días" en el modal Nueva/Editar tarea — fila real por
+   ítem (contenido-sin-errores), no un <select multiple>. */
+.campo-dias-modal{ margin-top:14px; }
+
+.campo-dias-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:6px;
+}
+.campo-dias-modal-header span{ font-size:13px; color:var(--muted); }
+.campo-dias-modal-header button{
     background:none;
     border:none;
-    color:var(--muted);
-    cursor:pointer;
+    color:var(--gold-deep);
     font-size:12px;
     font-weight:600;
-    padding:2px 0;
-    text-decoration:underline;
-    text-underline-offset:2px;
-}
-.btn-ocultar-tarea:hover{ color:var(--text); }
-
-/* Cajón de tareas ocultas — <details> nativo, sin JS para abrir/
-   cerrar. Vive FUERA de #contenido-gestion-imprimible a propósito:
-   lo que un local ocultó no tiene que aparecer en su PDF del día. */
-.drawer-tareas-ocultas{
-    margin:14px 0 18px;
-    border:1px dashed var(--line);
-    border-radius:var(--radius-sm);
-    padding:12px 16px;
-}
-
-.drawer-tareas-ocultas summary{
     cursor:pointer;
-    font-size:13px;
-    font-weight:600;
-    color:var(--muted);
-    list-style:none;
+    padding:2px 0;
 }
-.drawer-tareas-ocultas summary::-webkit-details-marker{ display:none; }
-.drawer-tareas-ocultas summary::before{ content:"▸ "; }
-.drawer-tareas-ocultas[open] summary::before{ content:"▾ "; }
 
-.drawer-tareas-ocultas .lista-tareas-gestion{ margin-top:12px; }
-.drawer-tareas-ocultas .tarea-gestion{ opacity:.6; }
+.dias-checkbox-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:8px;
+}
+
+/* .dias-checkbox-grid > .dia-checkbox-fila (no ".dia-checkbox-fila" a
+   secas) para ganarle en especificidad a ".modal-body label"
+   (display:block + margin-top:14px) — mismo truco ya documentado en
+   .radio-cards > .radio-card. */
+.dias-checkbox-grid > .dia-checkbox-fila{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 10px;
+    background:var(--soft);
+    border:1px solid var(--line);
+    border-radius:var(--radius-sm);
+    font-size:13.5px;
+    color:var(--text);
+    cursor:pointer;
+    margin:0;
+}
+.dia-checkbox-fila input{ accent-color:var(--gold); width:16px; height:16px; flex-shrink:0; }
