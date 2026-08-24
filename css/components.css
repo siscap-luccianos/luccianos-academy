@@ -5553,7 +5553,8 @@ table.data-table tbody tr:hover{
    columna, para dejar lugar al selector debajo de la fila principal.
    Misma especificidad "dos clases" que .tarea-gestion-desplegable
    para pisarle el display:flex de fila sin duplicar el resto. */
-.tarea-gestion.tarea-gestion-simple-semanal{
+.tarea-gestion.tarea-gestion-simple-semanal,
+.tarea-gestion.tarea-gestion-simple{
     display:flex;
     flex-direction:column;
     padding:0;
@@ -5607,3 +5608,48 @@ table.data-table tbody tr:hover{
     font-weight:600;
     padding:4px 0;
 }
+
+/* "Ocultar para mi local" — visible en TODAS las tarjetas, no solo
+   las semanales (Reportes fiscales, Control de pedidos, etc. también
+   pueden no aplicarle a un local puntual). */
+.tarea-gestion-ocultar-control{
+    padding:8px 18px 12px;
+    border-top:1px solid var(--line);
+}
+
+.btn-ocultar-tarea{
+    background:none;
+    border:none;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:12px;
+    font-weight:600;
+    padding:2px 0;
+    text-decoration:underline;
+    text-underline-offset:2px;
+}
+.btn-ocultar-tarea:hover{ color:var(--text); }
+
+/* Cajón de tareas ocultas — <details> nativo, sin JS para abrir/
+   cerrar. Vive FUERA de #contenido-gestion-imprimible a propósito:
+   lo que un local ocultó no tiene que aparecer en su PDF del día. */
+.drawer-tareas-ocultas{
+    margin:14px 0 18px;
+    border:1px dashed var(--line);
+    border-radius:var(--radius-sm);
+    padding:12px 16px;
+}
+
+.drawer-tareas-ocultas summary{
+    cursor:pointer;
+    font-size:13px;
+    font-weight:600;
+    color:var(--muted);
+    list-style:none;
+}
+.drawer-tareas-ocultas summary::-webkit-details-marker{ display:none; }
+.drawer-tareas-ocultas summary::before{ content:"▸ "; }
+.drawer-tareas-ocultas[open] summary::before{ content:"▾ "; }
+
+.drawer-tareas-ocultas .lista-tareas-gestion{ margin-top:12px; }
+.drawer-tareas-ocultas .tarea-gestion{ opacity:.6; }

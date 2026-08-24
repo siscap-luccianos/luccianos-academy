@@ -128,6 +128,17 @@ function selectorDiaHtml(t) {
     `;
 }
 
+/** Pedido explícito: cada local puede OCULTAR (no eliminar) una tarea
+ *  que no le aplica — el contenido maestro no se toca, solo su propia
+ *  vista. Reversible siempre, sin pedirle nada al Admin. */
+function ocultarControlHtml() {
+    return `
+        <div class="tarea-gestion-ocultar-control">
+            <button type="button" class="btn-ocultar-tarea" data-ocultar-tarea>Ocultar para mi local</button>
+        </div>
+    `;
+}
+
 function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
     const id = `tarea-${idUnico}`;
     const atrSemanal = esSemanal ? ` data-tarea-semanal="${t.id}"` : "";
@@ -157,35 +168,27 @@ function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
                     </div>
                 </div>
                 ${esSemanal ? selectorDiaHtml(t) : ""}
+                ${ocultarControlHtml()}
             </div>
         `;
     }
 
-    if (esSemanal) {
-        return `
-            <div class="tarea-gestion tarea-gestion-simple-semanal"${atrSemanal}>
-                <label class="tarea-gestion-label" for="${id}">
-                    <input type="checkbox" id="${id}" class="tarea-gestion-check">
-                    <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
-                    <span class="tarea-gestion-txt">
-                        <strong>${t.titulo}</strong>
-                        <span>${t.detalle}</span>
-                    </span>
-                </label>
-                ${selectorDiaHtml(t)}
-            </div>
-        `;
-    }
-
+    // Tareas simples (sin sub-ítems) van SIEMPRE en un div envolvente
+    // — no solo cuando son semanales — para poder colgarles el
+    // control de "Ocultar" igual que a las desplegables.
     return `
-        <label class="tarea-gestion" for="${id}">
-            <input type="checkbox" id="${id}" class="tarea-gestion-check">
-            <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
-            <span class="tarea-gestion-txt">
-                <strong>${t.titulo}</strong>
-                <span>${t.detalle}</span>
-            </span>
-        </label>
+        <div class="tarea-gestion${esSemanal ? " tarea-gestion-simple-semanal" : " tarea-gestion-simple"}"${atrSemanal}>
+            <label class="tarea-gestion-label" for="${id}">
+                <input type="checkbox" id="${id}" class="tarea-gestion-check">
+                <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
+                <span class="tarea-gestion-txt">
+                    <strong>${t.titulo}</strong>
+                    <span>${t.detalle}</span>
+                </span>
+            </label>
+            ${esSemanal ? selectorDiaHtml(t) : ""}
+            ${ocultarControlHtml()}
+        </div>
     `;
 }
 
@@ -403,6 +406,11 @@ export async function Gestion() {
                 <button class="tab-gestion" data-vista-dia="bajo-demanda">Cuando lo pidan</button>
             </div>
 
+            <details class="drawer-tareas-ocultas">
+                <summary>Tareas ocultas para mi local (<span data-contador-ocultas>0</span>)</summary>
+                <div class="lista-tareas-gestion" id="tareas-ocultas-lista"></div>
+            </details>
+
             <div id="contenido-gestion-imprimible">
                 ${membreteHtml("Guía de Gestión")}
                 ${DIAS.map((d, i) => `
@@ -519,6 +527,34 @@ function bindTarjetaDesplegable(tarjeta) {
     });
 }
 
+function actualizarContadorOcultas() {
+    const contador = document.querySelector("[data-contador-ocultas]");
+    const lista = document.getElementById("tareas-ocultas-lista");
+    if (contador && lista) contador.textContent = lista.children.length;
+}
+
+/** "Ocultar para mi local" / "Mostrar de nuevo" — un solo botón que
+ *  alterna: mueve la tarjeta ENTERA al cajón (o de vuelta a donde
+ *  estaba, guardado en data-origen-panel). No borra nada — el
+ *  contenido maestro no se toca, solo la vista de este local. */
+function bindOcultarTarea(boton) {
+    boton.addEventListener("click", () => {
+        const tarjeta = boton.closest(".tarea-gestion");
+        const yaOculta = tarjeta.classList.toggle("tarea-oculta-local");
+        if (yaOculta) {
+            const panelActual = tarjeta.closest("[data-panel-dia]");
+            tarjeta.dataset.origenPanel = panelActual ? panelActual.dataset.panelDia : "";
+            document.getElementById("tareas-ocultas-lista").appendChild(tarjeta);
+            boton.textContent = "Mostrar de nuevo";
+        } else {
+            const listaDestino = document.querySelector(`[data-panel-dia="${tarjeta.dataset.origenPanel}"] .lista-tareas-gestion`);
+            (listaDestino || document.querySelector(".lista-tareas-gestion"))?.appendChild(tarjeta);
+            boton.textContent = "Ocultar para mi local";
+        }
+        actualizarContadorOcultas();
+    });
+}
+
 /** Le engancha a un nodo recién insertado (una tarjeta entera, la
  *  devuelta por confirmarNuevaTarea) todo lo que le corresponda según
  *  su forma — mismo resultado que si hubiera venido en el render
@@ -526,6 +562,7 @@ function bindTarjetaDesplegable(tarjeta) {
 function bindTarjetaNueva(nodo) {
     nodo.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
     nodo.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
+    nodo.querySelectorAll("[data-ocultar-tarea]").forEach(bindOcultarTarea);
     if (nodo.matches("[data-desplegable]")) bindTarjetaDesplegable(nodo);
 }
 
@@ -561,6 +598,7 @@ export function bindGestion() {
     document.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
     document.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
     document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
+    document.querySelectorAll("[data-ocultar-tarea]").forEach(bindOcultarTarea);
 
     // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
     // Lecciones: encabezado + sub-tareas sueltas, el día se elige al
