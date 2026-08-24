@@ -13,14 +13,15 @@
                        (arranca Domingo — más actividad, se cuenta
                        para recibir el lunes). Cada tarea tiene una o
                        más "dias" (ej. depósitos: Lunes Y Viernes) —
-                       las pills de la propia tarjeta la mueven entre
-                       días sin tocar código. Antes de ver los días,
-                       la pestaña "Tareas" es donde el local elige qué
-                       le corresponde — TODO arranca destildado
-                       (tareasAplicables vacío): lo que no se marca ahí
-                       no aparece en ningún día. Check LOCAL (no se
-                       guarda, se resetea al recargar) solo para que
-                       la interacción se sienta real.
+                       "aplica a mi local" NO es un interruptor aparte,
+                       ES tener al menos un día elegido. La pestaña
+                       "Tareas" es un catálogo desplegable: tocás una
+                       tarea, se despliegan las pills de día ahí mismo,
+                       elegís, y pasa a verde ("En uso"). Sin ningún
+                       día, queda gris ("Sin usar") y no aparece en
+                       ningún día real. Check LOCAL (no se guarda, se
+                       resetea al recargar) solo para que la
+                       interacción se sienta real.
      3. ¿Qué hago si...? — guía situacional. Estructura fija por
                        situación (Qué hacer / Qué NO hacer / Cuándo
                        escalar / Herramienta relacionada), TODAS
@@ -104,14 +105,6 @@ const TAREAS = [
  *  y se actualiza en cada alta/baja/cambio de día. */
 const registroTareas = new Map();
 
-/** Qué tareas aplican a ESTE local — pedido explícito: "una pill que
- *  diga Tareas y cada local elige las que le corresponden, las que no
- *  selecciona quedan descartadas por defecto". Arranca VACÍO a
- *  propósito (nada visible en los días hasta que se elige en la
- *  pestaña "Tareas") — reemplaza el "Ocultar" anterior: un solo
- *  interruptor por tarea en vez de tener que ocultarla día por día. */
-const tareasAplicables = new Set();
-
 const ICONOS_TAREA = [
     { valor: "documento", label: "Documento" },
     { valor: "caja", label: "Caja / pedido" },
@@ -153,23 +146,29 @@ function accionesTareaHtml() {
     `;
 }
 
-/** Fila de la pestaña "Tareas" — el checklist plano donde el local
- *  elige qué le corresponde. Pedido explícito: acá NINGUNA tarea
- *  tiene día, solo está la tarea — el día se ve y se ajusta en la
- *  pestaña de ESE día (pills en la tarjeta), no acá. Para sacar una
- *  tarea de todos lados, se vuelve a "Tareas" y se destilda, listo.
- *  Arranca destildada — "las que no selecciona quedan descartadas por
- *  defecto". */
+/** Fila de la pestaña "Tareas" — pedido explícito: tocarla DESPLIEGA
+ *  los días de la semana ahí mismo (mismo patrón desplegable que
+ *  "Pedido a proveedores"), se eligen con las pills, y la tarjeta
+ *  pasa a verde ("En uso") apenas tiene al menos un día marcado. Sin
+ *  ningún día marcado queda gris ("Sin usar") — no hace falta un
+ *  interruptor aparte: "aplica" ES "tiene días elegidos". */
 function aplicaTareaHtml(t) {
+    const enUso = t.dias.length > 0;
     return `
-        <label class="fila-aplica-tarea" for="aplica-${t.id}">
-            <input type="checkbox" id="aplica-${t.id}" class="check-aplica-tarea" data-tarea-id="${t.id}"${tareasAplicables.has(t.id) ? " checked" : ""}>
-            <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
-            <span class="tarea-gestion-txt">
-                <strong>${t.titulo}</strong>
-                <span>${t.detalle}</span>
-            </span>
-        </label>
+        <div class="tarea-gestion tarea-gestion-desplegable fila-aplica-tarea${enUso ? " en-uso" : ""}" data-desplegable data-tarea-id="${t.id}">
+            <button type="button" class="tarea-gestion-header" data-toggle-desplegable>
+                <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
+                <span class="tarea-gestion-txt">
+                    <strong>${t.titulo}</strong>
+                    <span>${t.detalle}</span>
+                </span>
+                <span class="badge-en-uso${enUso ? " activa" : ""}">${enUso ? "En uso" : "Sin usar"}</span>
+                <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
+            </button>
+            <div class="tarea-gestion-subitems">
+                ${diasControlHtml(t)}
+            </div>
+        </div>
     `;
 }
 
@@ -309,8 +308,12 @@ function bindModalTarea() {
 function recrearTareaEnPaneles(idTarea) {
     const tarea = registroTareas.get(idTarea);
     if (!tarea) return;
-    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
-    if (!tareasAplicables.has(idTarea)) return; // no aplica a este local — no se dibuja en ningún día
+    // :not(.fila-aplica-tarea) — la fila de "Tareas" es también
+    // .tarea-gestion con el mismo data-tarea-id, pero esa se
+    // actualiza aparte (actualizarFilaAplica), no se destruye acá.
+    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]:not(.fila-aplica-tarea)`).forEach((n) => n.remove());
+    // dias vacío = "sin usar" — el .forEach de abajo simplemente no
+    // agrega ninguna copia, no hace falta un guard aparte.
     tarea.dias.forEach((d) => {
         const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
         if (!lista) return;
@@ -352,24 +355,20 @@ function confirmarTarea(idEditado = null) {
     }
 
     registroTareas.set(id, { id, icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) });
-    // Recién creada/editada por vos ahora mismo — que se vea al toque,
-    // no que se pierda en "Tareas" hasta acordarse de tildarla.
     // recrearTareaEnPaneles ya sincroniza la fila de "Tareas" sola.
-    tareasAplicables.add(id);
     recrearTareaEnPaneles(id);
     return true;
 }
 
-/** Elimina TODAS las copias de una tarea (Admin) — pide confirmación
+/** Elimina TODAS las copias de una tarea (Admin, incluida la fila de
+ *  "Tareas" — también es .tarea-gestion) — pide confirmación
  *  explícita, mismo patrón que ya usan Locales/Manuales/Colaboradores
  *  (confirm() con el nombre de lo que se borra). */
 function eliminarTarea(idTarea) {
     const tarea = registroTareas.get(idTarea);
     if (!confirm(`¿Eliminar "${tarea?.titulo || "esta tarea"}"? Esta acción no se puede deshacer.`)) return;
     document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
-    document.querySelector(`.fila-aplica-tarea[for="aplica-${idTarea}"]`)?.remove();
     registroTareas.delete(idTarea);
-    tareasAplicables.delete(idTarea);
 }
 
 /** Abre el modal de tarea — sin argumentos, "+ Nueva tarea"; con
@@ -490,14 +489,15 @@ export async function Gestion() {
                 ${DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")}
             </div>
 
-            <!-- "Tareas": el local elige qué le corresponde — arranca
-                 todo destildado, "las que no selecciona quedan
-                 descartadas por defecto" (pedido explícito). Vive
+            <!-- "Tareas": catálogo — tocás una, se despliegan sus
+                 días, elegís. Con al menos un día queda verde ("En
+                 uso") y aparece en esos días reales; sin ninguno,
+                 gris ("Sin usar") y no aparece en ningún lado. Vive
                  FUERA de #contenido-gestion-imprimible: es
                  configuración, no algo que se exporte en el PDF del
                  día. -->
             <div class="section" data-panel-dia="tareas">
-                <p class="aviso-tareas-aplicables">Elegí qué tareas te corresponden — las que no marques no van a aparecer en ningún día.</p>
+                <p class="aviso-tareas-aplicables">Tocá una tarea para elegir en qué días la necesitás.</p>
                 <div class="lista-tareas-gestion" id="lista-aplica-tareas">
                     ${TAREAS.map(aplicaTareaHtml).join("")}
                 </div>
@@ -509,7 +509,7 @@ export async function Gestion() {
                     <div class="section" data-panel-dia="${d}" style="display:none">
                         <h3>${d}</h3>
                         <div class="lista-tareas-gestion">
-                            ${TAREAS.filter((t) => t.dias.includes(d) && tareasAplicables.has(t.id)).map((t) => tareaHtml(t, `${t.id}-${d}`)).join("")}
+                            ${TAREAS.filter((t) => t.dias.includes(d)).map((t) => tareaHtml(t, `${t.id}-${d}`)).join("")}
                         </div>
                     </div>
                 `).join("")}
@@ -538,9 +538,12 @@ function bindCheckboxHecha(chk) {
 }
 
 /** Pills Do/Lu/Ma/.../Sá de la propia tarjeta — tocar una prende/apaga
- *  ESE día para la tarea (no reemplaza el resto, los suma/saca). No
- *  deja quedar la tarea sin ningún día. Reconstruye las copias con
- *  recrearTareaEnPaneles (mismo camino que "Guardar" del modal). */
+ *  ESE día para la tarea (no reemplaza el resto, los suma/saca).
+ *  Llegar a CERO días es válido a propósito: es la forma de decir
+ *  "sin usar" desde la pestaña "Tareas" (ver aplicaTareaHtml) — ahí
+ *  no hay un interruptor aparte, "aplica" ES tener algún día.
+ *  Reconstruye las copias con recrearTareaEnPaneles (mismo camino que
+ *  "Guardar" del modal). */
 function bindDiasControl(contenedor) {
     contenedor.querySelectorAll("[data-toggle-dia]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -549,10 +552,12 @@ function bindDiasControl(contenedor) {
             if (!tarea) return;
             const dia = btn.dataset.toggleDia;
             const idx = tarea.dias.indexOf(dia);
-            if (idx !== -1 && tarea.dias.length === 1) return; // no puede quedar sin ningún día
             if (idx === -1) tarea.dias.push(dia); else tarea.dias.splice(idx, 1);
             recrearTareaEnPaneles(idTarea);
-            document.querySelector(`#tabs-dias-gestion [data-vista-dia="${dia}"]`)?.click();
+            // Solo saltar a la pestaña del día si la tarea sigue
+            // usándose — si se acaba de vaciar del todo, no tiene
+            // sentido llevarte a un día donde ya no va a aparecer.
+            if (tarea.dias.length) document.querySelector(`#tabs-dias-gestion [data-vista-dia="${dia}"]`)?.click();
         });
     });
 }
@@ -618,28 +623,22 @@ function bindTarjetaDesplegable(tarjeta) {
 }
 
 /** Sincroniza la fila de la pestaña "Tareas" con lo que se acaba de
- *  crear/editar — la vuelve a dibujar si ya existía (título/detalle/
- *  días pueden haber cambiado) o la agrega si es una tarea nueva. */
+ *  crear/editar/mover de día — la vuelve a dibujar si ya existía
+ *  (título/detalle/días/color "en uso" pueden haber cambiado) o la
+ *  agrega si es una tarea nueva. Conserva si estaba desplegada, para
+ *  no cerrarle la tarjeta en la cara a media edición. */
 function actualizarFilaAplica(idTarea) {
     const tarea = registroTareas.get(idTarea);
     if (!tarea) return;
-    const filaVieja = document.querySelector(`.fila-aplica-tarea[for="aplica-${idTarea}"]`);
+    const filaVieja = document.querySelector(`.fila-aplica-tarea[data-tarea-id="${idTarea}"]`);
+    const estabaDesplegada = filaVieja?.classList.contains("desplegada");
     if (filaVieja) filaVieja.outerHTML = aplicaTareaHtml(tarea);
     else document.getElementById("lista-aplica-tareas")?.insertAdjacentHTML("beforeend", aplicaTareaHtml(tarea));
-    const chk = document.getElementById(`aplica-${idTarea}`);
-    if (chk) bindAplicaTarea(chk);
-}
-
-/** Pestaña "Tareas" — el interruptor real de "esto le corresponde a
- *  mi local sí/no". Tildar/destildar prende/apaga la tarea en TODOS
- *  sus días de una — no hay que ir día por día como antes. */
-function bindAplicaTarea(chk) {
-    chk.addEventListener("change", () => {
-        const idTarea = chk.dataset.tareaId;
-        if (chk.checked) tareasAplicables.add(idTarea);
-        else tareasAplicables.delete(idTarea);
-        recrearTareaEnPaneles(idTarea);
-    });
+    const filaNueva = document.querySelector(`.fila-aplica-tarea[data-tarea-id="${idTarea}"]`);
+    if (!filaNueva) return;
+    if (estabaDesplegada) filaNueva.classList.add("desplegada");
+    bindTarjetaDesplegable(filaNueva);
+    filaNueva.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
 }
 
 function bindEditarTarea(boton) {
@@ -699,7 +698,6 @@ export function bindGestion() {
     document.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
     document.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
     document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
-    document.querySelectorAll(".check-aplica-tarea").forEach(bindAplicaTarea);
     document.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     document.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
 

@@ -5588,11 +5588,12 @@ table.data-table tbody tr:hover{
     display:flex;
     flex-wrap:wrap;
     gap:10px;
-    margin-bottom:18px;
+    margin-top:18px;
+    margin-bottom:22px;
 }
 .acciones-gestion-semanal .btn{
-    padding:8px 16px;
-    font-size:13px;
+    padding:7px 14px;
+    font-size:12.5px;
 }
 
 /* Modal "Nueva tarea" — sub-tareas sueltas, mismo espíritu que los
@@ -5643,32 +5644,37 @@ table.data-table tbody tr:hover{
     height:30px;
 }
 
-/* Pestaña "Tareas" — el checklist plano donde el local elige qué le
-   corresponde. Arranca todo destildado a propósito. */
+/* Pestaña "Tareas" — catálogo desplegable (misma base que
+   .tarea-gestion-desplegable: la fila ya trae padding:0, header
+   clickeable, chevron que rota). Acá solo hace falta el color "en
+   uso" — NO reusa .hecha (esa tacha el título, es semántica de
+   "completado", no de "aplica"). */
 .aviso-tareas-aplicables{
     margin:0 0 14px;
     font-size:13px;
     color:var(--muted);
 }
 
-.fila-aplica-tarea{
-    display:flex;
-    align-items:center;
-    gap:14px;
-    padding:14px 18px;
-    background:var(--card);
-    border:1px solid var(--line);
-    border-radius:var(--radius-sm);
-    cursor:pointer;
-    transition:var(--transition);
+.fila-aplica-tarea.en-uso{
+    border-color:var(--success);
+    background:var(--success-soft);
 }
-.fila-aplica-tarea:hover{ border-color:var(--gold); }
 
-.check-aplica-tarea{
+.badge-en-uso{
     flex-shrink:0;
-    width:20px;
-    height:20px;
-    accent-color:var(--gold);
+    align-self:center;
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--soft);
+    color:var(--muted);
+}
+.badge-en-uso.activa{
+    background:var(--success-soft);
+    color:var(--success);
 }
 
 /* Checkboxes de "Días" en el modal Nueva/Editar tarea — fila real por
