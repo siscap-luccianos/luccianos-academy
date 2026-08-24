@@ -538,12 +538,13 @@ function bindCheckboxHecha(chk) {
 }
 
 /** Pills Do/Lu/Ma/.../Sá de la propia tarjeta — tocar una prende/apaga
- *  ESE día para la tarea (no reemplaza el resto, los suma/saca).
- *  Llegar a CERO días es válido a propósito: es la forma de decir
- *  "sin usar" desde la pestaña "Tareas" (ver aplicaTareaHtml) — ahí
- *  no hay un interruptor aparte, "aplica" ES tener algún día.
- *  Reconstruye las copias con recrearTareaEnPaneles (mismo camino que
- *  "Guardar" del modal). */
+ *  ESE día para la tarea (no reemplaza el resto, los suma/saca). NO
+ *  cambia de pestaña sola (se sacó a pedido — molestaba justo donde
+ *  más se usa, eligiendo varios días seguidos desde "Tareas"). Llegar
+ *  a CERO días es válido a propósito: es la forma de decir "sin usar"
+ *  desde ahí — no hay un interruptor aparte, "aplica" ES tener algún
+ *  día. Reconstruye las copias con recrearTareaEnPaneles (mismo
+ *  camino que "Guardar" del modal). */
 function bindDiasControl(contenedor) {
     contenedor.querySelectorAll("[data-toggle-dia]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -554,10 +555,6 @@ function bindDiasControl(contenedor) {
             const idx = tarea.dias.indexOf(dia);
             if (idx === -1) tarea.dias.push(dia); else tarea.dias.splice(idx, 1);
             recrearTareaEnPaneles(idTarea);
-            // Solo saltar a la pestaña del día si la tarea sigue
-            // usándose — si se acaba de vaciar del todo, no tiene
-            // sentido llevarte a un día donde ya no va a aparecer.
-            if (tarea.dias.length) document.querySelector(`#tabs-dias-gestion [data-vista-dia="${dia}"]`)?.click();
         });
     });
 }
