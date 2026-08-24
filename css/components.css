@@ -5671,14 +5671,6 @@ table.data-table tbody tr:hover{
     accent-color:var(--gold);
 }
 
-.fila-aplica-tarea-dias{
-    flex-shrink:0;
-    font-size:12px;
-    color:var(--muted);
-    text-align:right;
-    max-width:120px;
-}
-
 /* Checkboxes de "Días" en el modal Nueva/Editar tarea — fila real por
    ítem (contenido-sin-errores), no un <select multiple>. */
 .campo-dias-modal{ margin-top:14px; }

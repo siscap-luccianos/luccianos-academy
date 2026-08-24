@@ -154,10 +154,12 @@ function accionesTareaHtml() {
 }
 
 /** Fila de la pestaña "Tareas" — el checklist plano donde el local
- *  elige qué le corresponde. Sin días ni sub-ítems acá, solo "esto
- *  aplica sí/no" + cuándo pasa (para reconocerla sin tener que
- *  adivinar). Arranca destildada — "las que no selecciona quedan
- *  descartadas por defecto". */
+ *  elige qué le corresponde. Pedido explícito: acá NINGUNA tarea
+ *  tiene día, solo está la tarea — el día se ve y se ajusta en la
+ *  pestaña de ESE día (pills en la tarjeta), no acá. Para sacar una
+ *  tarea de todos lados, se vuelve a "Tareas" y se destilda, listo.
+ *  Arranca destildada — "las que no selecciona quedan descartadas por
+ *  defecto". */
 function aplicaTareaHtml(t) {
     return `
         <label class="fila-aplica-tarea" for="aplica-${t.id}">
@@ -167,7 +169,6 @@ function aplicaTareaHtml(t) {
                 <strong>${t.titulo}</strong>
                 <span>${t.detalle}</span>
             </span>
-            <span class="fila-aplica-tarea-dias">${t.dias.length === 7 ? "Todos los días" : t.dias.join(", ")}</span>
         </label>
     `;
 }
@@ -316,6 +317,11 @@ function recrearTareaEnPaneles(idTarea) {
         lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`));
         bindTarjetaNueva(lista.lastElementChild);
     });
+    // Si el cambio de día se disparó DESDE la propia fila de "Tareas"
+    // (sus pills son las mismas que las de la tarjeta), esa fila
+    // también tiene que reflejar el estado nuevo — si no, queda
+    // mostrando los días viejos hasta el próximo render.
+    actualizarFilaAplica(idTarea);
 }
 
 /** Lee el form, valida (título + al menos un día) y guarda — crea un
@@ -348,9 +354,9 @@ function confirmarTarea(idEditado = null) {
     registroTareas.set(id, { id, icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) });
     // Recién creada/editada por vos ahora mismo — que se vea al toque,
     // no que se pierda en "Tareas" hasta acordarse de tildarla.
+    // recrearTareaEnPaneles ya sincroniza la fila de "Tareas" sola.
     tareasAplicables.add(id);
     recrearTareaEnPaneles(id);
-    actualizarFilaAplica(id);
     return true;
 }
 
