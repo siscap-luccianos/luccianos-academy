@@ -34,7 +34,9 @@
 
 import { Header } from "../components/header.js";
 import { Icon } from "../components/icons.js";
+import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
+import { escaparHtml } from "../services/html.js";
 
 /* ============================
    1. Formación — solo temas, sin contenido todavía
@@ -100,6 +102,19 @@ const TAREAS_SEMANALES = [
 const TAREAS_BAJO_DEMANDA = [
     { icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración." },
 ];
+
+const ICONOS_TAREA = [
+    { valor: "documento", label: "Documento" },
+    { valor: "caja", label: "Caja / pedido" },
+    { valor: "calendario", label: "Calendario" },
+    { valor: "camara", label: "Cámara" },
+    { valor: "tacho", label: "Limpieza" },
+    { valor: "usuarios", label: "Equipo" },
+    { valor: "corazon", label: "Cliente" },
+    { valor: "idea", label: "Idea" },
+];
+
+let contadorTareaNueva = 0;
 
 function selectorDiaHtml(t) {
     return `
@@ -172,6 +187,123 @@ function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
             </span>
         </label>
     `;
+}
+
+/* ── "+ Nueva tarea" (admin) ─────────────────────────────────────
+   Pedido explícito: mismo patrón que ya existe en Lecciones — un
+   encabezado (ej. "Inventario") y abajo sub-tareas sueltas ("No te
+   olvides de imprimir la planilla", "No te olvides de la lapicera").
+   El día se elige DESPUÉS, como último paso, no antes. */
+function subtareaNuevaFilaHtml(texto = "") {
+    return `
+        <div class="subtarea-nueva-fila">
+            <textarea class="input-subtarea-nueva-texto" rows="1" placeholder="Ej: No te olvides de imprimir la planilla">${escaparHtml(texto)}</textarea>
+            <button type="button" class="btn-quitar-subtarea-nueva" aria-label="Quitar esta sub-tarea">×</button>
+        </div>
+    `;
+}
+
+function contenidoModalNuevaTarea() {
+    return `
+        <label>Título
+            <textarea id="input-tarea-titulo" rows="1" placeholder="Ej: Inventario"></textarea>
+        </label>
+        <label>Detalle (opcional, una línea)
+            <textarea id="input-tarea-detalle" rows="1" placeholder="Ej: Antes de armar el pedido a fábrica."></textarea>
+        </label>
+        <label>Ícono
+            <select id="input-tarea-icono">
+                ${ICONOS_TAREA.map((i) => `<option value="${i.valor}">${i.label}</option>`).join("")}
+            </select>
+        </label>
+        <label>Repetición
+            <select id="input-tarea-frecuencia">
+                <option value="semanal">Un día específico</option>
+                <option value="diaria">Todos los días</option>
+                <option value="bajo-demanda">Cuando lo pidan (sin día fijo)</option>
+            </select>
+        </label>
+        <label id="campo-tarea-dia">Día
+            <select id="input-tarea-dia">
+                ${DIAS.map((d) => `<option value="${d}">${d}</option>`).join("")}
+            </select>
+        </label>
+        <label class="campo-subtareas-nueva">Sub-tareas (opcional)
+            <div id="lista-subtareas-nueva"></div>
+            <button type="button" class="btn-agregar-subtarea-nueva" id="btn-agregar-subtarea-nueva">+ Agregar sub-tarea</button>
+        </label>
+    `;
+}
+
+function bindModalNuevaTarea() {
+    const listaSubtareas = document.getElementById("lista-subtareas-nueva");
+    const selectFrecuencia = document.getElementById("input-tarea-frecuencia");
+    const campoDia = document.getElementById("campo-tarea-dia");
+
+    function actualizarVisibilidadDia() {
+        campoDia.style.display = selectFrecuencia.value === "semanal" ? "" : "none";
+    }
+    selectFrecuencia.addEventListener("change", actualizarVisibilidadDia);
+    actualizarVisibilidadDia();
+
+    function agregarFilaSubtarea() {
+        listaSubtareas.insertAdjacentHTML("beforeend", subtareaNuevaFilaHtml());
+    }
+    document.getElementById("btn-agregar-subtarea-nueva").addEventListener("click", agregarFilaSubtarea);
+
+    listaSubtareas.addEventListener("click", (e) => {
+        if (e.target.classList.contains("btn-quitar-subtarea-nueva")) {
+            e.target.closest(".subtarea-nueva-fila").remove();
+        }
+    });
+}
+
+/** Arma la tarea desde el form, la inserta en el/los panel(es) que
+ *  correspondan y devuelve el nodo insertado (para reengancharle los
+ *  listeners — ver bindNuevaTareaEnDom en bindGestion). Devuelve null
+ *  si faltó el título (validación mínima, ya se avisó con alert). */
+function confirmarNuevaTarea() {
+    const titulo = document.getElementById("input-tarea-titulo").value.trim();
+    if (!titulo) {
+        alert("Ponele un título a la tarea antes de guardar.");
+        return null;
+    }
+    const detalle = document.getElementById("input-tarea-detalle").value.trim();
+    const icono = document.getElementById("input-tarea-icono").value;
+    const frecuencia = document.getElementById("input-tarea-frecuencia").value;
+    const dia = document.getElementById("input-tarea-dia").value;
+    const subitems = Array.from(document.querySelectorAll(".input-subtarea-nueva-texto"))
+        .map((t) => t.value.trim())
+        .filter(Boolean);
+
+    contadorTareaNueva += 1;
+    const idNuevo = `nueva-${contadorTareaNueva}`;
+    const base = { icono, titulo, detalle, ...(subitems.length ? { subitems } : {}) };
+
+    const nodosInsertados = [];
+
+    if (frecuencia === "diaria") {
+        TAREAS_DIARIAS.push(base);
+        DIAS.forEach((d) => {
+            const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
+            if (!lista) return;
+            lista.insertAdjacentHTML("beforeend", tareaHtml(base, `diaria-nueva-${idNuevo}-${d}`));
+            nodosInsertados.push(lista.lastElementChild);
+        });
+    } else if (frecuencia === "bajo-demanda") {
+        TAREAS_BAJO_DEMANDA.push(base);
+        const lista = document.querySelector(`[data-panel-dia="bajo-demanda"] .lista-tareas-gestion`);
+        lista.insertAdjacentHTML("beforeend", tareaHtml(base, `demanda-nueva-${idNuevo}`));
+        nodosInsertados.push(lista.lastElementChild);
+    } else {
+        const tarea = { id: idNuevo, ...base, dia };
+        TAREAS_SEMANALES.push(tarea);
+        const lista = document.querySelector(`[data-panel-dia="${dia}"] .lista-tareas-gestion`);
+        lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `semanal-${idNuevo}`, { esSemanal: true }));
+        nodosInsertados.push(lista.lastElementChild);
+    }
+
+    return nodosInsertados;
 }
 
 /* ============================
@@ -257,9 +389,14 @@ export async function Gestion() {
         </div>
 
         <div data-panel-gestion="semanal" style="display:none">
-            <button type="button" class="btn btn-secondary" id="btn-exportar-gestion" style="margin-bottom:18px">
-                ${Icon("descargar", { size: 16 })} Exportar a PDF
-            </button>
+            <div class="acciones-gestion-semanal">
+                <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">
+                    ${Icon("descargar", { size: 16 })} Exportar a PDF
+                </button>
+                <button type="button" class="btn btn-primary" id="btn-nueva-tarea">
+                    + Nueva tarea
+                </button>
+            </div>
 
             <div class="tabs-gestion" id="tabs-dias-gestion">
                 ${DIAS.map((d, i) => `<button class="tab-gestion${i === 0 ? " activa" : ""}" data-vista-dia="${d}">${d}</button>`).join("")}
@@ -296,6 +433,102 @@ export async function Gestion() {
     `;
 }
 
+// ── Funciones de bind reutilizables ──────────────────────────────
+// Se usan tanto en la carga inicial de la página como en una tarea
+// recién creada con "+ Nueva tarea" — así una tarjeta nueva se
+// comporta EXACTAMENTE igual que las que ya vinieron armadas, sin
+// duplicar la lógica en dos lugares.
+
+function bindCheckboxHecha(chk) {
+    chk.addEventListener("change", () => {
+        chk.closest(".tarea-gestion").classList.toggle("hecha", chk.checked);
+    });
+}
+
+/** Mueve la tarjeta ENTERA (no la recrea) al panel del día elegido —
+ *  no pierde su estado de tildado/desplegado. Pedido explícito:
+ *  control propio sobre el día, sin depender de un pedido de código
+ *  cada vez. */
+function bindSelectorDia(select) {
+    select.addEventListener("change", () => {
+        const tarea = select.closest("[data-tarea-semanal]");
+        const listaDestino = document.querySelector(`[data-panel-dia="${select.value}"] .lista-tareas-gestion`);
+        if (!tarea || !listaDestino) return;
+        listaDestino.appendChild(tarea);
+        document.querySelector(`#tabs-dias-gestion [data-vista-dia="${select.value}"]`)?.click();
+    });
+}
+
+/** Tareas con sub-ítems (ej. "Pedido a proveedores") y situaciones de
+ *  "¿Qué hago si...?" comparten el mismo patrón desplegable: tocar el
+ *  encabezado abre/cierra lo de abajo, con "+ Agregar ítem" propio. */
+function bindTarjetaDesplegable(tarjeta) {
+    const header = tarjeta.querySelector("[data-toggle-desplegable]");
+    const contenedorSubitems = tarjeta.querySelector("[data-subitems]");
+    const progreso = tarjeta.querySelector("[data-progreso]");
+
+    header.addEventListener("click", () => {
+        tarjeta.classList.toggle("desplegada");
+    });
+
+    if (!contenedorSubitems || !progreso) return; // situación de "¿Qué hago si...?": no tiene checklist derivado.
+
+    // Recalcula SIEMPRE contra lo que hay en el DOM en ese momento (no
+    // una lista capturada al abrir la página) — así "16/16" en vez de
+    // "0/8" cuando se agregaron ítems nuevos, sin pedirlo por código.
+    function actualizarProgreso() {
+        const subitems = contenedorSubitems.querySelectorAll(".subitem-gestion-check");
+        const hechos = Array.from(subitems).filter((s) => s.checked).length;
+        progreso.textContent = `${hechos}/${subitems.length}`;
+        tarjeta.classList.toggle("hecha", subitems.length > 0 && hechos === subitems.length);
+    }
+
+    // Un solo listener por delegación cubre los checkboxes de siempre
+    // Y los que se agreguen después — no hace falta reenganchar nada
+    // cuando crece la lista.
+    contenedorSubitems.addEventListener("change", (e) => {
+        if (e.target.classList.contains("subitem-gestion-check")) actualizarProgreso();
+    });
+
+    const inputNuevo = tarjeta.querySelector(".input-subitem-nuevo");
+    const filaAgregar = tarjeta.querySelector(".subitem-gestion-agregar");
+
+    function agregarSubitem() {
+        const texto = (inputNuevo.value || "").trim();
+        if (!texto) return;
+        const idNuevo = `subitem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const label = document.createElement("label");
+        label.className = "subitem-gestion";
+        label.setAttribute("for", idNuevo);
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.id = idNuevo;
+        chk.className = "subitem-gestion-check";
+        const span = document.createElement("span");
+        span.textContent = texto; // textContent, nunca innerHTML — no confiar en lo que tipeó el usuario acá
+        label.append(chk, span);
+        contenedorSubitems.insertBefore(label, filaAgregar);
+        inputNuevo.value = "";
+        inputNuevo.focus();
+        actualizarProgreso();
+    }
+
+    tarjeta.querySelector("[data-agregar-subitem]")?.addEventListener("click", agregarSubitem);
+    inputNuevo?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); agregarSubitem(); }
+    });
+}
+
+/** Le engancha a un nodo recién insertado (una tarjeta entera, la
+ *  devuelta por confirmarNuevaTarea) todo lo que le corresponda según
+ *  su forma — mismo resultado que si hubiera venido en el render
+ *  inicial. */
+function bindTarjetaNueva(nodo) {
+    nodo.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
+    nodo.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
+    if (nodo.matches("[data-desplegable]")) bindTarjetaDesplegable(nodo);
+}
+
 export function bindGestion() {
     // Tabs: mostrar/ocultar paneles, nada más — cada panel ya vino
     // renderizado entero desde Gestion(), no hay fetch por tab.
@@ -325,86 +558,28 @@ export function bindGestion() {
         });
     });
 
-    // Selector "Día" de una tarea semanal — mueve la tarjeta ENTERA
-    // (no la recrea) al panel del día elegido, así no pierde su
-    // estado de tildado/desplegado. Pedido explícito: control propio
-    // sobre el día, sin depender de un pedido de código cada vez.
-    document.querySelectorAll(".select-dia-tarea").forEach((select) => {
-        select.addEventListener("change", () => {
-            const tarea = select.closest("[data-tarea-semanal]");
-            const listaDestino = document.querySelector(`[data-panel-dia="${select.value}"] .lista-tareas-gestion`);
-            if (!tarea || !listaDestino) return;
-            listaDestino.appendChild(tarea);
-            tabsDias?.querySelector(`[data-vista-dia="${select.value}"]`)?.click();
-        });
-    });
+    document.querySelectorAll(".select-dia-tarea").forEach(bindSelectorDia);
+    document.querySelectorAll(".tarea-gestion-check").forEach(bindCheckboxHecha);
+    document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
 
-    document.querySelectorAll(".tarea-gestion-check").forEach((chk) => {
-        chk.addEventListener("change", () => {
-            chk.closest(".tarea-gestion").classList.toggle("hecha", chk.checked);
-        });
-    });
-
-    // Tareas con sub-ítems (ej. "Pedido a proveedores", "Limpieza del
-    // equipamiento") y situaciones de "¿Qué hago si...?" comparten el
-    // mismo patrón desplegable: tocar el encabezado abre/cierra lo de
-    // abajo.
-    document.querySelectorAll("[data-desplegable]").forEach((tarjeta) => {
-        const header = tarjeta.querySelector("[data-toggle-desplegable]");
-        const contenedorSubitems = tarjeta.querySelector("[data-subitems]");
-        const progreso = tarjeta.querySelector("[data-progreso]");
-
-        header.addEventListener("click", () => {
-            tarjeta.classList.toggle("desplegada");
-        });
-
-        if (!contenedorSubitems || !progreso) return; // situación de "¿Qué hago si...?": no tiene checklist derivado.
-
-        // Recalcula SIEMPRE contra lo que hay en el DOM en ese momento
-        // (no una lista capturada al abrir la página) — así "16/16"
-        // en vez de "0/8" cuando el usuario agregó ítems nuevos, sin
-        // tener que pedírmelo cada vez.
-        function actualizarProgreso() {
-            const subitems = contenedorSubitems.querySelectorAll(".subitem-gestion-check");
-            const hechos = Array.from(subitems).filter((s) => s.checked).length;
-            progreso.textContent = `${hechos}/${subitems.length}`;
-            tarjeta.classList.toggle("hecha", subitems.length > 0 && hechos === subitems.length);
-        }
-
-        // Un solo listener por delegación cubre los checkboxes de
-        // siempre Y los que se agreguen después — no hace falta
-        // reenganchar nada cuando crece la lista.
-        contenedorSubitems.addEventListener("change", (e) => {
-            if (e.target.classList.contains("subitem-gestion-check")) actualizarProgreso();
-        });
-
-        const inputNuevo = tarjeta.querySelector(".input-subitem-nuevo");
-        const filaAgregar = tarjeta.querySelector(".subitem-gestion-agregar");
-
-        function agregarSubitem() {
-            const texto = (inputNuevo.value || "").trim();
-            if (!texto) return;
-            const idNuevo = `subitem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const label = document.createElement("label");
-            label.className = "subitem-gestion";
-            label.setAttribute("for", idNuevo);
-            const chk = document.createElement("input");
-            chk.type = "checkbox";
-            chk.id = idNuevo;
-            chk.className = "subitem-gestion-check";
-            const span = document.createElement("span");
-            span.textContent = texto; // textContent, nunca innerHTML — no confiar en lo que tipeó el usuario acá
-            label.append(chk, span);
-            contenedorSubitems.insertBefore(label, filaAgregar);
-            inputNuevo.value = "";
-            inputNuevo.focus();
-            actualizarProgreso();
-        }
-
-        tarjeta.querySelector("[data-agregar-subitem]")?.addEventListener("click", agregarSubitem);
-        inputNuevo?.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") { e.preventDefault(); agregarSubitem(); }
-        });
+    // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
+    // Lecciones: encabezado + sub-tareas sueltas, el día se elige al
+    // final. La tarjeta que arma confirmarNuevaTarea() se engancha
+    // con bindTarjetaNueva para que se comporte igual que las que ya
+    // vinieron armadas (check, desplegable, selector de día).
+    document.getElementById("btn-nueva-tarea")?.addEventListener("click", () => {
+        const idModal = "modal-nueva-tarea";
+        abrirModal(
+            Modal({ id: idModal, titulo: "Nueva tarea", contenidoHtml: contenidoModalNuevaTarea(), textoConfirmar: "Guardar" }),
+            idModal,
+            () => {
+                const nodos = confirmarNuevaTarea();
+                if (!nodos) return; // faltó el título, el modal se queda abierto para corregir
+                nodos.forEach(bindTarjetaNueva);
+                cerrarModal(idModal);
+            },
+        );
+        bindModalNuevaTarea();
     });
 
     // "Exportar a PDF" — solo la Gestión semanal (es la única parte

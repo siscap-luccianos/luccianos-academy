@@ -5567,3 +5567,43 @@ table.data-table tbody tr:hover{
     padding:16px 18px;
     cursor:pointer;
 }
+
+/* Botones sobre la pila de días ("Exportar a PDF" / "+ Nueva tarea"). */
+.acciones-gestion-semanal{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:18px;
+}
+
+/* Modal "Nueva tarea" — sub-tareas sueltas, mismo espíritu que los
+   sub-puntos de un paso en Lecciones (academia.js: subpuntoHtml). */
+.subtarea-nueva-fila{
+    display:flex;
+    gap:8px;
+    align-items:flex-start;
+    margin-bottom:8px;
+}
+.subtarea-nueva-fila textarea{ flex:1; }
+
+.btn-quitar-subtarea-nueva{
+    flex:0 0 auto;
+    padding:8px 12px;
+    background:var(--danger-soft);
+    border:1px solid var(--danger);
+    border-radius:var(--radius-sm);
+    color:var(--danger);
+    font-size:15px;
+    font-weight:bold;
+    cursor:pointer;
+}
+
+.btn-agregar-subtarea-nueva{
+    background:none;
+    border:none;
+    color:var(--gold-deep);
+    cursor:pointer;
+    font-size:12.5px;
+    font-weight:600;
+    padding:4px 0;
+}
