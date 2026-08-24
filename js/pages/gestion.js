@@ -1,10 +1,10 @@
 /* ============================
    Lucciano's Academy
-   pages/gestion.js — Responsables de Local y Turno — MAQUETA
+   pages/gestion.js — Responsables de Local y Turno
 
-   Pantalla de visualización, no funcional todavía: el usuario pidió
-   "armar en repo algo para visualizar una idea" antes de decidir la
-   estructura real. Tres áreas, tal como se definieron en conversación:
+   Sin ruta en el menú a propósito todavía (se navega escribiendo
+   #/gestion) — falta decidir si termina viviendo dentro de Academia.
+   Tres áreas:
 
      1. Formación   — texto (liderazgo, feedback, indicadores...).
                        Solo TÍTULOS de tema por ahora, cada uno
@@ -19,9 +19,16 @@
                        tarea, se despliegan las pills de día ahí mismo,
                        elegís, y pasa a verde ("En uso"). Sin ningún
                        día, queda gris ("Sin usar") y no aparece en
-                       ningún día real. Check LOCAL (no se guarda, se
-                       resetea al recargar) solo para que la
-                       interacción se sienta real.
+                       ningún día real.
+
+                       FASE 1 del backend (2026-08-24): el catálogo de
+                       tareas (crear/editar/eliminar/mover de día) ya
+                       persiste de verdad contra la hoja "GestionTareas"
+                       (data/gestionTareas.js) — no más array
+                       hardcodeado. El CHECK de "hecho hoy" sigue
+                       siendo puramente visual (se resetea al
+                       recargar) — eso es Fase 2, falta decidir cómo
+                       se guarda por sucursal.
      3. ¿Qué hago si...? — guía situacional. Estructura fija por
                        situación (Qué hacer / Qué NO hacer / Cuándo
                        escalar / Herramienta relacionada), TODAS
@@ -30,12 +37,6 @@
                        conflicto con cliente ya existe en un manual)
                        en una pasada aparte. Nada de esto es política
                        real todavía, es el molde nomás.
-
-   Nada de esto está conectado a datos reales todavía (sin ruta en el
-   menú a propósito — se navega escribiendo #/gestion). Cuando se
-   decida la estructura final, esto se reemplaza por la versión real,
-   probablemente viviendo dentro de Academia > "Responsables de Local
-   y Turno" en vez de una ruta suelta.
 =============================*/
 
 import { Header } from "../components/header.js";
@@ -43,6 +44,12 @@ import { Icon } from "../components/icons.js";
 import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
+import {
+    getTareas,
+    crearTarea as crearTareaBackend,
+    actualizarTarea as actualizarTareaBackend,
+    eliminarTarea as eliminarTareaBackend,
+} from "../data/gestionTareas.js";
 
 /* ============================
    1. Formación — solo temas, sin contenido todavía
@@ -82,27 +89,12 @@ function temaFormacionHtml(t) {
 =============================*/
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-// Pedido explícito: "predeterminado esté todo deshabilitado... que
-// carguen solamente los que sí sirve" — TODAS arrancan sin ningún
-// día (gris, "Sin usar" en la pestaña Tareas). El local las prende
-// desplegando la tarjeta en Tareas y tocando los días que le
-// corresponden — nada llega ya armado.
-const TAREAS = [
-    { id: "diaria-control", icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto.", dias: [] },
-    {
-        id: "diaria-limpieza", icono: "tacho", titulo: "Limpieza del equipamiento",
-        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.", dias: [],
-        subitems: ["Abatidor", "Armario", "Vitrina"],
-    },
-    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dias: [] },
-    {
-        id: "proveedores", icono: "caja", titulo: "Pedido a proveedores",
-        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dias: [],
-        subitems: ["Leche", "Crema", "Dore", "Barcena", "Limpieza", "Pastelería", "Rollos fiscales", "Posnet"],
-    },
-    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dias: [] },
-    { id: "reportes", icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración.", dias: [] },
-];
+// FASE 1: ya no es un array fijo — Gestion() lo puebla en cada render
+// con getTareas() (data/gestionTareas.js → hoja "GestionTareas" real).
+// Queda `let` porque confirmarTarea/eliminarTarea empujan/sacan de
+// acá mismo después de escribir en el backend, para no tener que
+// releer toda la hoja por cada cambio chico.
+let TAREAS = [];
 
 /** id → tarea real de TODAS las tareas vivas — única fuente de verdad
  *  para "Editar" y para las pills de día (prellenar/leer datos reales,
@@ -120,8 +112,6 @@ const ICONOS_TAREA = [
     { valor: "corazon", label: "Cliente" },
     { valor: "idea", label: "Idea" },
 ];
-
-let contadorTareaNueva = 0;
 
 /** Todas las tareas arrancan sin día — un panel de día sin nada
  *  cargado todavía no tiene que leerse como "roto". Función (no CSS
@@ -192,6 +182,7 @@ function aplicaTareaHtml(t) {
             </button>
             <div class="tarea-gestion-subitems">
                 ${diasControlHtml(t)}
+                ${accionesTareaHtml()}
             </div>
         </div>
     `;
@@ -357,11 +348,14 @@ function recrearTareaEnPaneles(idTarea) {
     actualizarFilaAplica(idTarea);
 }
 
-/** Lee el form, valida (título + al menos un día) y guarda — crea un
- *  id nuevo o reusa `idEditado` si es una edición. Devuelve true/false
- *  según si pudo guardar (false = validación falló, ya avisada con
- *  alert, el modal se queda abierto para corregir). */
-function confirmarTarea(idEditado = null) {
+/** Lee el form, valida (título + al menos un día) y guarda DE VERDAD
+ *  contra la hoja "GestionTareas" (Fase 1) — crea o actualiza según
+ *  venga `idEditado`. Devuelve true/false según si pudo guardar
+ *  (false = validación falló O el backend rechazó, ya avisado con
+ *  alert, el modal se queda abierto para corregir). El botón
+ *  "Guardar" del modal ya muestra "Guardando..." solo mientras esto
+ *  está pendiente (abrirModal lo maneja). */
+async function confirmarTarea(idEditado = null) {
     const titulo = document.getElementById("input-tarea-titulo").value.trim();
     if (!titulo) {
         alert("Ponele un título a la tarea antes de guardar.");
@@ -377,28 +371,46 @@ function confirmarTarea(idEditado = null) {
     const subitems = Array.from(document.querySelectorAll(".input-subtarea-nueva-texto"))
         .map((t) => t.value.trim())
         .filter(Boolean);
+    const datos = { icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) };
 
-    let id = idEditado;
-    if (!id) {
-        contadorTareaNueva += 1;
-        id = `nueva-${contadorTareaNueva}`;
+    if (idEditado) {
+        const r = await actualizarTareaBackend(idEditado, datos);
+        if (!r?.ok) {
+            alert("No se pudo guardar — probá de nuevo.");
+            return false;
+        }
+        registroTareas.set(idEditado, { id: idEditado, ...datos });
+        TAREAS = TAREAS.map((t) => (t.id === idEditado ? registroTareas.get(idEditado) : t));
+        recrearTareaEnPaneles(idEditado);
+    } else {
+        const nueva = await crearTareaBackend(datos);
+        if (!nueva) {
+            alert("No se pudo crear la tarea — probá de nuevo.");
+            return false;
+        }
+        registroTareas.set(nueva.id, nueva);
+        TAREAS.push(nueva);
+        recrearTareaEnPaneles(nueva.id);
     }
-
-    registroTareas.set(id, { id, icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) });
-    // recrearTareaEnPaneles ya sincroniza la fila de "Tareas" sola.
-    recrearTareaEnPaneles(id);
     return true;
 }
 
 /** Elimina TODAS las copias de una tarea (Admin, incluida la fila de
  *  "Tareas" — también es .tarea-gestion) — pide confirmación
  *  explícita, mismo patrón que ya usan Locales/Manuales/Colaboradores
- *  (confirm() con el nombre de lo que se borra). */
-function eliminarTarea(idTarea) {
+ *  (confirm() con el nombre de lo que se borra), y recién saca del
+ *  DOM/registro si el backend confirmó el borrado. */
+async function eliminarTarea(idTarea) {
     const tarea = registroTareas.get(idTarea);
     if (!confirm(`¿Eliminar "${tarea?.titulo || "esta tarea"}"? Esta acción no se puede deshacer.`)) return;
+    const r = await eliminarTareaBackend(idTarea);
+    if (!r?.ok) {
+        alert("No se pudo eliminar — probá de nuevo.");
+        return;
+    }
     document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
     registroTareas.delete(idTarea);
+    TAREAS = TAREAS.filter((t) => t.id !== idTarea);
 }
 
 /** Abre el modal de tarea — sin argumentos, "+ Nueva tarea"; con
@@ -408,8 +420,9 @@ function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
     abrirModal(
         Modal({ id: idModal, titulo: idEditado ? "Editar tarea" : "Nueva tarea", contenidoHtml: contenidoModalTarea({ tarea }), textoConfirmar: "Guardar" }),
         idModal,
-        () => {
-            if (!confirmarTarea(idEditado)) return;
+        async () => {
+            const ok = await confirmarTarea(idEditado);
+            if (!ok) return;
             cerrarModal(idModal);
         },
     );
@@ -478,6 +491,11 @@ const TABS = [
 ];
 
 export async function Gestion() {
+    // FASE 1: se lee de la hoja real en cada entrada a la página — el
+    // router ya muestra MascotaCarga() mientras esto resuelve, no hace
+    // falta un loading propio acá.
+    TAREAS = await getTareas();
+
     // Puebla el registro (id → tarea real) con lo que arranca cargado
     // — así "Editar" y las pills de día tienen de dónde leer/escribir
     // desde el primer render, no solo para lo creado después.
@@ -489,7 +507,7 @@ export async function Gestion() {
 
         <div class="aviso-maqueta">
             ${Icon("idea", { size: 16 })}
-            <p>Vista previa para decidir la estructura — Formación y "¿Qué hago si...?" son solo el molde, todavía sin contenido real. Los checks de Gestión semanal se resetean al recargar.</p>
+            <p>Formación y "¿Qué hago si...?" son solo el molde, todavía sin contenido real. El catálogo de "Tareas" ya se guarda de verdad — los checks de "hecho hoy" todavía no, se resetean al recargar.</p>
         </div>
 
         <div class="tabs-gestion" id="tabs-gestion">
@@ -527,7 +545,7 @@ export async function Gestion() {
                  configuración, no algo que se exporte en el PDF del
                  día. -->
             <div class="section" data-panel-dia="tareas">
-                <p class="aviso-tareas-aplicables">Tocá una tarea para elegir en qué días la necesitás.</p>
+                <p class="aviso-tareas-aplicables">${TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
                 <div class="lista-tareas-gestion" id="lista-aplica-tareas">
                     ${TAREAS.map(aplicaTareaHtml).join("")}
                 </div>
@@ -577,7 +595,13 @@ function bindCheckboxHecha(chk) {
  *  a CERO días es válido a propósito: es la forma de decir "sin usar"
  *  desde ahí — no hay un interruptor aparte, "aplica" ES tener algún
  *  día. Reconstruye las copias con recrearTareaEnPaneles (mismo
- *  camino que "Guardar" del modal). */
+ *  camino que "Guardar" del modal).
+ *
+ *  FASE 1: optimista — la pantalla cambia al toque, el guardado real
+ *  contra "GestionTareas" va en segundo plano sin bloquear el click
+ *  (tocar 3-4 pills seguidas no tiene que sentirse con el ~1.5s de
+ *  latencia real de Apps Script en cada una). Si falla, se avisa y se
+ *  revierte — no queda mostrando algo que en la hoja real no quedó. */
 function bindDiasControl(contenedor) {
     contenedor.querySelectorAll("[data-toggle-dia]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -588,6 +612,14 @@ function bindDiasControl(contenedor) {
             const idx = tarea.dias.indexOf(dia);
             if (idx === -1) tarea.dias.push(dia); else tarea.dias.splice(idx, 1);
             recrearTareaEnPaneles(idTarea);
+            actualizarTareaBackend(idTarea, tarea).then((r) => {
+                if (r?.ok) return;
+                alert(`No se pudo guardar el cambio de día para "${tarea.titulo}" — probá de nuevo.`);
+                // Revertir en memoria y en pantalla al estado de antes del click.
+                if (idx === -1) tarea.dias.splice(tarea.dias.indexOf(dia), 1);
+                else tarea.dias.splice(idx, 0, dia);
+                recrearTareaEnPaneles(idTarea);
+            });
         });
     });
 }
@@ -667,8 +699,13 @@ function actualizarFilaAplica(idTarea) {
     const filaNueva = document.querySelector(`.fila-aplica-tarea[data-tarea-id="${idTarea}"]`);
     if (!filaNueva) return;
     if (estabaDesplegada) filaNueva.classList.add("desplegada");
-    bindTarjetaDesplegable(filaNueva);
-    filaNueva.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
+    // bindTarjetaNueva le engancha TODO lo que le corresponda (día,
+    // desplegable, Editar, Eliminar) — antes solo se enganchaba el
+    // desplegable y las pills de día, y Editar/Eliminar quedaban sin
+    // listener (el botón estaba en el HTML pero clickearlo no hacía
+    // nada). bindTarjetaNueva también busca .tarea-gestion-check, que
+    // acá no existe — no-op inofensivo, no un problema.
+    bindTarjetaNueva(filaNueva);
 }
 
 function bindEditarTarea(boton) {
