@@ -14,6 +14,7 @@
 =============================*/
 
 import { Header } from "../components/header.js";
+import { MascotaCarga } from "../components/mascotaCarga.js";
 import { Table } from "../components/table.js";
 import { CourseCard } from "../components/courseCard.js";
 import { EmptyState } from "../components/emptyState.js";
@@ -41,6 +42,19 @@ export async function Cursos(params = []) {
 
     const usuario = getUsuarioActual();
     const cursoId = params && params[0];
+
+    // "Responsables de Local y Turno" (id 8, categoría "Gestión") no
+    // tiene lecciones reales — quedó como placeholder "Próximamente"
+    // desde el principio. Todo su contenido real vive en #/gestion
+    // (Formación / Gestión semanal / ¿Qué hago si...?), así que entrar
+    // a este curso puntual redirige derecho ahí en vez de mostrar esa
+    // lección vacía. El id está fijo a propósito (es el mismo en la
+    // Sheet real, confirmado a mano) — si algún día se renumera, hay
+    // que actualizar acá.
+    if (String(cursoId) === "8") {
+        navigate("gestion", { replace: true });
+        return MascotaCarga();
+    }
 
     // Con un cursoId, siempre es una vista previa del curso real (para
     // un admin, esto es "Vista previa" desde Academia — ver
