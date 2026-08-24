@@ -5516,3 +5516,54 @@ table.data-table tbody tr:hover{
     color:var(--muted);
     font-style:italic;
 }
+
+/* Selector "Día" en tareas semanales — vos reasignás el día de una
+   tarea sin pedir un cambio de código. */
+.tarea-gestion-dia-control{
+    padding:10px 18px 14px;
+    border-top:1px solid var(--line);
+}
+
+.tarea-gestion-dia-control label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:11.5px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    font-weight:700;
+}
+
+.select-dia-tarea{
+    padding:6px 10px;
+    background:var(--soft);
+    border:1px solid var(--line);
+    border-radius:var(--radius-sm);
+    color:var(--text);
+    font-size:13px;
+    text-transform:none;
+    letter-spacing:normal;
+    font-weight:500;
+    cursor:pointer;
+}
+.select-dia-tarea:focus{ outline:none; border-color:var(--gold); }
+
+/* Tarea semanal simple (sin sub-ítems) con selector de día — en
+   columna, para dejar lugar al selector debajo de la fila principal.
+   Misma especificidad "dos clases" que .tarea-gestion-desplegable
+   para pisarle el display:flex de fila sin duplicar el resto. */
+.tarea-gestion.tarea-gestion-simple-semanal{
+    display:flex;
+    flex-direction:column;
+    padding:0;
+    cursor:default;
+}
+
+.tarea-gestion-label{
+    display:flex;
+    align-items:flex-start;
+    gap:14px;
+    padding:16px 18px;
+    cursor:pointer;
+}

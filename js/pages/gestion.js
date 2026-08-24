@@ -9,10 +9,13 @@
      1. Formación   — texto (liderazgo, feedback, indicadores...).
                        Solo TÍTULOS de tema por ahora, cada uno
                        "Próximamente" — sin inventar contenido.
-     2. Gestión semanal — el checklist tipo calendario (las 6 tareas
-                       que el usuario enumeró él mismo), con un check
-                       LOCAL (no se guarda, se resetea al recargar)
-                       solo para que la interacción se sienta real.
+     2. Gestión semanal — el checklist tipo calendario, por día
+                       (arranca Domingo — más actividad, se cuenta
+                       para recibir el lunes). Las tareas semanales
+                       tienen un selector de "Día" propio, reasignable
+                       sin tocar código. Check LOCAL (no se guarda, se
+                       resetea al recargar) solo para que la
+                       interacción se sienta real.
      3. ¿Qué hago si...? — guía situacional. Estructura fija por
                        situación (Qué hacer / Qué NO hacer / Cuándo
                        escalar / Herramienta relacionada), TODAS
@@ -58,72 +61,65 @@ function temaFormacionHtml(t) {
 }
 
 /* ============================
-   2. Gestión semanal — el checklist (ya estaba armado)
+   2. Gestión semanal — el checklist, ahora por día
+
+   La semana arranca DOMINGO a propósito (pedido explícito): es el día
+   de más actividad — ahí se cuenta para que el lunes entren los
+   pedidos. "dia" en cada tarea semanal es solo el punto de partida,
+   no algo fijo — el selector "Día" de cada tarjeta la mueve al
+   momento, sin tocar código (mismo espíritu que "+ Agregar ítem").
 =============================*/
-const GRUPOS = [
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+// Aparecen los 7 días, cada día con SU PROPIO check — limpiar el
+// abatidor el lunes no debería dar por hecha la limpieza del martes.
+const TAREAS_DIARIAS = [
+    { icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto." },
     {
-        titulo: "Domingos",
-        tareas: [
-            {
-                icono: "calendario",
-                titulo: "Armar los horarios del equipo",
-                detalle: "Para la semana que arranca, según cómo vino la venta.",
-            },
-        ],
-    },
-    {
-        titulo: "Semanal",
-        tareas: [
-            {
-                icono: "caja",
-                titulo: "Pedido a proveedores",
-                detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.",
-                subitems: ["Leche", "Crema", "Dore", "Barcena", "Limpieza", "Pastelería", "Rollos fiscales", "Posnet"],
-            },
-            {
-                icono: "caja",
-                titulo: "Pedido a fábrica",
-                detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.",
-            },
-        ],
-    },
-    {
-        titulo: "Cuando lo pida Admin",
-        tareas: [
-            {
-                icono: "documento",
-                titulo: "Reportes fiscales",
-                detalle: "Según lo solicite Administración.",
-            },
-        ],
-    },
-    {
-        titulo: "Todos los días",
-        tareas: [
-            {
-                icono: "camara",
-                titulo: "Control de pedidos y reclamos",
-                detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto.",
-            },
-            {
-                icono: "tacho",
-                titulo: "Limpieza del equipamiento",
-                detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.",
-                // Arranca con lo que el usuario dictó de entrada — el
-                // resto lo suma él mismo con "+ Agregar ítem" en el
-                // navegador, no hace falta pedírmelo a mí cada vez.
-                subitems: ["Abatidor", "Armario", "Vitrina"],
-            },
-        ],
+        icono: "tacho",
+        titulo: "Limpieza del equipamiento",
+        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.",
+        subitems: ["Abatidor", "Armario", "Vitrina"],
     },
 ];
 
-function tareaHtml(t, idGrupo, idTarea) {
-    const id = `tarea-${idGrupo}-${idTarea}`;
+// Un día de referencia cada una — reasignable con el selector de la
+// propia tarjeta.
+const TAREAS_SEMANALES = [
+    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dia: "Domingo" },
+    {
+        id: "proveedores", icono: "caja", titulo: "Pedido a proveedores",
+        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dia: "Domingo",
+        subitems: ["Leche", "Crema", "Dore", "Barcena", "Limpieza", "Pastelería", "Rollos fiscales", "Posnet"],
+    },
+    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dia: "Domingo" },
+];
+
+// Sin día — dispara cuando Administración lo pide, no entra en el
+// ciclo semanal (por eso tiene su propia pestaña aparte, no un día).
+const TAREAS_BAJO_DEMANDA = [
+    { icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración." },
+];
+
+function selectorDiaHtml(t) {
+    return `
+        <div class="tarea-gestion-dia-control">
+            <label>Día
+                <select class="select-dia-tarea">
+                    ${DIAS.map((d) => `<option value="${d}"${d === t.dia ? " selected" : ""}>${d}</option>`).join("")}
+                </select>
+            </label>
+        </div>
+    `;
+}
+
+function tareaHtml(t, idUnico, { esSemanal = false } = {}) {
+    const id = `tarea-${idUnico}`;
+    const atrSemanal = esSemanal ? ` data-tarea-semanal="${t.id}"` : "";
 
     if (t.subitems) {
         return `
-            <div class="tarea-gestion tarea-gestion-desplegable" data-desplegable>
+            <div class="tarea-gestion tarea-gestion-desplegable" data-desplegable${atrSemanal}>
                 <button type="button" class="tarea-gestion-header" data-toggle-desplegable>
                     <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                     <span class="tarea-gestion-txt">
@@ -145,6 +141,23 @@ function tareaHtml(t, idGrupo, idTarea) {
                         <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
                     </div>
                 </div>
+                ${esSemanal ? selectorDiaHtml(t) : ""}
+            </div>
+        `;
+    }
+
+    if (esSemanal) {
+        return `
+            <div class="tarea-gestion tarea-gestion-simple-semanal"${atrSemanal}>
+                <label class="tarea-gestion-label" for="${id}">
+                    <input type="checkbox" id="${id}" class="tarea-gestion-check">
+                    <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
+                    <span class="tarea-gestion-txt">
+                        <strong>${t.titulo}</strong>
+                        <span>${t.detalle}</span>
+                    </span>
+                </label>
+                ${selectorDiaHtml(t)}
             </div>
         `;
     }
@@ -248,16 +261,28 @@ export async function Gestion() {
                 ${Icon("descargar", { size: 16 })} Exportar a PDF
             </button>
 
+            <div class="tabs-gestion" id="tabs-dias-gestion">
+                ${DIAS.map((d, i) => `<button class="tab-gestion${i === 0 ? " activa" : ""}" data-vista-dia="${d}">${d}</button>`).join("")}
+                <button class="tab-gestion" data-vista-dia="bajo-demanda">Cuando lo pidan</button>
+            </div>
+
             <div id="contenido-gestion-imprimible">
                 ${membreteHtml("Guía de Gestión")}
-                ${GRUPOS.map((g, ig) => `
-                    <div class="section">
-                        <h3>${g.titulo}</h3>
+                ${DIAS.map((d, i) => `
+                    <div class="section" data-panel-dia="${d}" style="${i === 0 ? "" : "display:none"}">
+                        <h3>${d}</h3>
                         <div class="lista-tareas-gestion">
-                            ${g.tareas.map((t, it) => tareaHtml(t, ig, it)).join("")}
+                            ${TAREAS_DIARIAS.map((t, it) => tareaHtml(t, `diaria-${it}-${d}`)).join("")}
+                            ${TAREAS_SEMANALES.filter((t) => t.dia === d).map((t) => tareaHtml(t, `semanal-${t.id}`, { esSemanal: true })).join("")}
                         </div>
                     </div>
                 `).join("")}
+                <div class="section" data-panel-dia="bajo-demanda" style="display:none">
+                    <h3>Cuando lo pidan</h3>
+                    <div class="lista-tareas-gestion">
+                        ${TAREAS_BAJO_DEMANDA.map((t, it) => tareaHtml(t, `demanda-${it}`)).join("")}
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -283,6 +308,34 @@ export function bindGestion() {
             document.querySelectorAll("[data-panel-gestion]").forEach((panel) => {
                 panel.style.display = panel.dataset.panelGestion === vista ? "" : "none";
             });
+        });
+    });
+
+    // Pills de días (Domingo primero) — mismo patrón que los tabs de
+    // área, anidado adentro de "Gestión semanal".
+    const tabsDias = document.getElementById("tabs-dias-gestion");
+    tabsDias?.querySelectorAll("[data-vista-dia]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            tabsDias.querySelectorAll("[data-vista-dia]").forEach((b) => b.classList.remove("activa"));
+            btn.classList.add("activa");
+            const dia = btn.dataset.vistaDia;
+            document.querySelectorAll("[data-panel-dia]").forEach((panel) => {
+                panel.style.display = panel.dataset.panelDia === dia ? "" : "none";
+            });
+        });
+    });
+
+    // Selector "Día" de una tarea semanal — mueve la tarjeta ENTERA
+    // (no la recrea) al panel del día elegido, así no pierde su
+    // estado de tildado/desplegado. Pedido explícito: control propio
+    // sobre el día, sin depender de un pedido de código cada vez.
+    document.querySelectorAll(".select-dia-tarea").forEach((select) => {
+        select.addEventListener("change", () => {
+            const tarea = select.closest("[data-tarea-semanal]");
+            const listaDestino = document.querySelector(`[data-panel-dia="${select.value}"] .lista-tareas-gestion`);
+            if (!tarea || !listaDestino) return;
+            listaDestino.appendChild(tarea);
+            tabsDias?.querySelector(`[data-vista-dia="${select.value}"]`)?.click();
         });
     });
 
