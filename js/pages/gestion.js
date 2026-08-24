@@ -45,8 +45,7 @@ import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
 import { getUsuarioActual } from "../services/auth.js";
-import { getColaboradoresPorSucursal, getUsuarios } from "../data/usuarios.js";
-import { mandarPush } from "../services/push.js";
+import { mandarPushGestion } from "../services/push.js";
 import {
     getTareas,
     crearTarea as crearTareaBackend,
@@ -756,10 +755,13 @@ function bindEliminarTarea(boton) {
 
 /** "Enviar push" — arma el título/cuerpo según el estado ACTUAL en
  *  pantalla (todos los sub-ítems tildados, o el propio check si es
- *  una tarea simple) y lo manda a los colegas de la MISMA sucursal
- *  que quien lo aprieta (mandarPush ya no-opea sola en modo demo). No
- *  depende de que el check esté persistido (eso es Fase 2) — mide lo
- *  que hay tildado ahora mismo, tal como se pidió. */
+ *  una tarea simple) y lo manda vía mandarPushGestion, que NO recibe
+ *  destinatarios — el backend decide solos (los demás Responsables de
+ *  la MISMA sucursal + Admin, provisorio). Así lo puede usar
+ *  cualquier Responsable de local/turno sin que el cliente tenga que
+ *  saber (ni pueda manipular) a quién le llega. No depende de que el
+ *  check esté persistido (eso es Fase 2) — mide lo que hay tildado
+ *  ahora mismo, tal como se pidió. */
 function bindEnviarPush(boton) {
     boton.addEventListener("click", async () => {
         const tarjeta = boton.closest(".tarea-gestion");
@@ -780,33 +782,10 @@ function bindEnviarPush(boton) {
         boton.disabled = true;
         boton.textContent = "Enviando...";
         try {
-            const usuario = getUsuarioActual();
-            const colegas = usuario?.sucursal ? await getColaboradoresPorSucursal(usuario.sucursal) : [];
-            // Pedido explícito: solo Responsable de local/turno, no
-            // cualquier colaborador del local — son quienes gestionan
-            // esto, no todo el equipo.
-            const destinatarios = new Set(
-                colegas
-                    .filter((c) => (c.encargado || c.responsableTurno) && c.id !== usuario.id)
-                    .map((c) => c.id),
-            );
-            // PROVISORIO — pedido explícito del usuario: mientras se
-            // confirma que el push realmente le llega a un Responsable
-            // real, sumar también a TODOS los Admin (vos incluido) como
-            // testigo directo, sin depender de relayar por el celular
-            // de otra persona. Sacar esto en cuanto se confirme que
-            // anda con cuentas de Responsable reales.
-            const admins = (await getUsuarios()).filter((u) => u.rol === "admin" && u.id !== usuario.id);
-            admins.forEach((a) => destinatarios.add(a.id));
-
-            if (!destinatarios.size) {
-                alert("No hay otro Responsable de local/turno (ni Admin) registrado para avisar.");
-                return;
-            }
             const cuerpo = !hayEstado
                 ? "Aviso desde Gestión semanal."
                 : completa ? "Tarea completa ✅" : "Tarea incompleta ⚠️ — revisá qué falta en la app.";
-            const r = await mandarPush(Array.from(destinatarios), tarea.titulo, cuerpo, "#/gestion");
+            const r = await mandarPushGestion(tarea.titulo, cuerpo, "#/gestion");
             if (!r?.ok) {
                 alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
                 return;

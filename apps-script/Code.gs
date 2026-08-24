@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.7.0";
+const BACKEND_VERSION = "1.8.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -155,6 +155,7 @@ function _despachar(body, usuarioActual) {
         case "eliminar":   return eliminar(body.hoja, body.id, usuarioActual);
         case "enviarMail": return enviarMailDesdeApp(body.destinatarios, body.asunto, body.cuerpo, usuarioActual);
         case "enviarPush": return enviarPush(body.usuarioIds, body.titulo, body.cuerpo, body.url, usuarioActual);
+        case "enviarPushGestion": return enviarPushGestion(body.titulo, body.cuerpo, body.url, usuarioActual);
         case "enviarPushPrueba": return enviarPushPrueba(usuarioActual);
         case "subirArchivo": return subirArchivo(body.nombreArchivo, body.extension, body.archivoBase64);
         case "subirFotoPerfil": return subirFotoPerfil(usuarioActual, body.extension, body.archivoBase64);
@@ -1126,14 +1127,11 @@ function _enviarUnPush(token, titulo, cuerpo, url, accessToken, projectId) {
  * ahí). Limpia solo los tokens que FCM confirma inválidos; un error
  * de red/timeout puntual NO borra el token (podría ser transitorio).
  */
-function enviarPush(usuarioIds, titulo, cuerpo, url, usuarioActual) {
-    if (!_esGestion(usuarioActual)) {
-        return { ok: false, error: "Solo Admin o Supervisor pueden mandar notificaciones push." };
-    }
-    if (!titulo || !(usuarioIds || []).length) {
-        return { ok: false, error: "Falta título o destinatarios." };
-    }
-
+/** El envío real — sin ACL acá, cada acción que llama a esto valida
+ *  el permiso ANTES (enviarPush: solo Admin/Supervisor con lista
+ *  libre; enviarPushGestion: cualquiera con destinatarios que decide
+ *  el servidor, no el cliente). */
+function _enviarPushATodos(usuarioIds, titulo, cuerpo, url) {
     const projectId = _propFCM("FCM_PROJECT_ID");
     const accessToken = _obtenerAccessTokenFCM();
 
@@ -1153,6 +1151,50 @@ function enviarPush(usuarioIds, titulo, cuerpo, url, usuarioActual) {
     });
 
     return { ok: true, enviados, fallidos: fallidos.length, destinatarios: tokens.length };
+}
+
+function enviarPush(usuarioIds, titulo, cuerpo, url, usuarioActual) {
+    if (!_esGestion(usuarioActual)) {
+        return { ok: false, error: "Solo Admin o Supervisor pueden mandar notificaciones push." };
+    }
+    if (!titulo || !(usuarioIds || []).length) {
+        return { ok: false, error: "Falta título o destinatarios." };
+    }
+    return _enviarPushATodos(usuarioIds, titulo, cuerpo, url);
+}
+
+/** Push acotado para "Gestión semanal" (#/gestion) — a diferencia de
+ *  enviarPush (solo Admin/Supervisor, acepta CUALQUIER lista de
+ *  destinatarios que mande el cliente), esta la puede llamar
+ *  cualquier Responsable de local/turno, pero el SERVIDOR decide los
+ *  destinatarios — el cliente no manda ninguna lista de ids, así no
+ *  hay forma de usarla para avisarle a alguien ajeno a su local.
+ *  Destinatarios: los demás Responsables de local/turno de SU MISMA
+ *  sucursal + todo Admin (PROVISORIO, para poder confirmar que llega
+ *  sin depender del celular de otra persona — sacar cuando se
+ *  confirme que anda con cuentas de Responsable reales). */
+function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
+    const puedeUsar = _esGestion(usuarioActual) || usuarioActual.encargado || usuarioActual.responsableTurno;
+    if (!puedeUsar) {
+        return { ok: false, error: "Solo Responsable de local/turno (o Admin/Supervisor) pueden avisar desde acá." };
+    }
+    if (!titulo) return { ok: false, error: "Falta título." };
+
+    const miSucursal = String(usuarioActual.sucursal || "").trim().toLowerCase();
+    const usuarios = _filasComoObjetos(_sheet("Usuarios"));
+    const destinatarios = usuarios.filter(function (u) {
+        if (String(u.id) === String(usuarioActual.id)) return false; // nunca a uno mismo
+        const esResponsableMismoLocal = miSucursal
+            && String(u.sucursal || "").trim().toLowerCase() === miSucursal
+            && (String(u.encargado || "").toUpperCase() === "SI" || String(u.responsableTurno || "").toUpperCase() === "SI");
+        const esAdmin = String(u.rol || "").trim().toLowerCase() === "admin"; // PROVISORIO
+        return esResponsableMismoLocal || esAdmin;
+    }).map(function (u) { return u.id; });
+
+    if (!destinatarios.length) {
+        return { ok: false, error: "No hay a quién avisar todavía (ni otro Responsable de tu local, ni Admin)." };
+    }
+    return _enviarPushATodos(destinatarios, titulo, cuerpo, url);
 }
 
 function enviarPushPrueba(usuarioActual) {
