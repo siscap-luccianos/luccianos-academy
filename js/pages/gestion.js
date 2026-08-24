@@ -82,21 +82,26 @@ function temaFormacionHtml(t) {
 =============================*/
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
+// Pedido explícito: "predeterminado esté todo deshabilitado... que
+// carguen solamente los que sí sirve" — TODAS arrancan sin ningún
+// día (gris, "Sin usar" en la pestaña Tareas). El local las prende
+// desplegando la tarjeta en Tareas y tocando los días que le
+// corresponden — nada llega ya armado.
 const TAREAS = [
-    { id: "diaria-control", icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto.", dias: [...DIAS] },
+    { id: "diaria-control", icono: "camara", titulo: "Control de pedidos y reclamos", detalle: "Con foto — gestionado acá mismo, sin depender de WhatsApp suelto.", dias: [] },
     {
         id: "diaria-limpieza", icono: "tacho", titulo: "Limpieza del equipamiento",
-        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.", dias: [...DIAS],
+        detalle: "Tocá para desplegar y marcar cada equipo a medida que lo limpiás.", dias: [],
         subitems: ["Abatidor", "Armario", "Vitrina"],
     },
-    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dias: ["Domingo"] },
+    { id: "horarios", icono: "calendario", titulo: "Armar los horarios del equipo", detalle: "Para la semana que arranca, según cómo vino la venta.", dias: [] },
     {
         id: "proveedores", icono: "caja", titulo: "Pedido a proveedores",
-        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dias: ["Domingo"],
+        detalle: "Tocá para desplegar y marcar cada uno a medida que hacés el pedido.", dias: [],
         subitems: ["Leche", "Crema", "Dore", "Barcena", "Limpieza", "Pastelería", "Rollos fiscales", "Posnet"],
     },
-    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dias: ["Domingo"] },
-    { id: "reportes", icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración.", dias: ["Domingo"] },
+    { id: "fabrica", icono: "caja", titulo: "Pedido a fábrica", detalle: "Después de hacer el inventario. Revisar el sistema de venta saliente para no pasarse del pedido.", dias: [] },
+    { id: "reportes", icono: "documento", titulo: "Reportes fiscales", detalle: "Según lo solicite Administración.", dias: [] },
 ];
 
 /** id → tarea real de TODAS las tareas vivas — única fuente de verdad
@@ -117,6 +122,26 @@ const ICONOS_TAREA = [
 ];
 
 let contadorTareaNueva = 0;
+
+/** Todas las tareas arrancan sin día — un panel de día sin nada
+ *  cargado todavía no tiene que leerse como "roto". Función (no CSS
+ *  ":empty") porque el contenedor real nunca queda 100% vacío: el
+ *  template deja espacios en blanco entre las etiquetas, y ":empty"
+ *  no los ignora. */
+function avisoDiaVacioHtml() {
+    return `<p class="aviso-dia-vacio">Sin tareas para este día todavía — andá a la pestaña "Tareas" y elegí cuáles corresponden.</p>`;
+}
+
+/** Agrega/saca el aviso de "día vacío" según corresponda — se llama
+ *  después de cualquier cambio de día (recrearTareaEnPaneles), no
+ *  solo al cargar la página. */
+function actualizarAvisoDiaVacio(lista) {
+    if (!lista) return;
+    const hayTareas = !!lista.querySelector(".tarea-gestion");
+    const aviso = lista.querySelector(".aviso-dia-vacio");
+    if (hayTareas && aviso) aviso.remove();
+    else if (!hayTareas && !aviso) lista.insertAdjacentHTML("beforeend", avisoDiaVacioHtml());
+}
 
 /** Pedido explícito: "que el selector de días me permita poner más de
  *  un día — los depósitos se hacen lunes y viernes". Pills, no un
@@ -203,7 +228,6 @@ function tareaHtml(t, idUnico) {
                         <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
                     </div>
                 </div>
-                ${diasControlHtml(t)}
                 ${accionesTareaHtml()}
             </div>
         `;
@@ -219,7 +243,6 @@ function tareaHtml(t, idUnico) {
                     <span>${t.detalle}</span>
                 </span>
             </label>
-            ${diasControlHtml(t)}
             ${accionesTareaHtml()}
         </div>
     `;
@@ -319,6 +342,13 @@ function recrearTareaEnPaneles(idTarea) {
         if (!lista) return;
         lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`));
         bindTarjetaNueva(lista.lastElementChild);
+    });
+    // Cualquier día pudo haber quedado sin nada (se le sacó la última
+    // tarea) o dejar de estar vacío (se le sumó la primera) — revisar
+    // los 7, no solo los de esta tarea, es la forma simple de no
+    // dejar ni un aviso viejo colgado ni uno faltante.
+    DIAS.forEach((d) => {
+        actualizarAvisoDiaVacio(document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`));
     });
     // Si el cambio de día se disparó DESDE la propia fila de "Tareas"
     // (sus pills son las mismas que las de la tarjeta), esa fila
@@ -505,14 +535,17 @@ export async function Gestion() {
 
             <div id="contenido-gestion-imprimible">
                 ${membreteHtml("Guía de Gestión")}
-                ${DIAS.map((d) => `
+                ${DIAS.map((d) => {
+                    const tareasDelDia = TAREAS.filter((t) => t.dias.includes(d));
+                    return `
                     <div class="section" data-panel-dia="${d}" style="display:none">
                         <h3>${d}</h3>
                         <div class="lista-tareas-gestion">
-                            ${TAREAS.filter((t) => t.dias.includes(d)).map((t) => tareaHtml(t, `${t.id}-${d}`)).join("")}
+                            ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`)).join("") : avisoDiaVacioHtml()}
                         </div>
                     </div>
-                `).join("")}
+                `;
+                }).join("")}
             </div>
         </div>
 

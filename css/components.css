@@ -5241,6 +5241,19 @@ table.data-table tbody tr:hover{
     margin-top:14px;
 }
 
+/* Todas las tareas arrancan sin día (pedido explícito) — un día sin
+   nada cargado todavía no tiene que leerse como "roto" (avisoDiaVacioHtml/
+   actualizarAvisoDiaVacio en gestion.js). */
+.aviso-dia-vacio{
+    margin:0;
+    padding:16px 18px;
+    border:1px dashed var(--line);
+    border-radius:var(--radius-sm);
+    color:var(--muted);
+    font-size:13px;
+    font-style:italic;
+}
+
 .tarea-gestion{
     display:flex;
     align-items:flex-start;
