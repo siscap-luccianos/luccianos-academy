@@ -45,7 +45,7 @@ import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
 import { getUsuarioActual } from "../services/auth.js";
-import { getColaboradoresPorSucursal } from "../data/usuarios.js";
+import { getColaboradoresPorSucursal, getUsuarios } from "../data/usuarios.js";
 import { mandarPush } from "../services/push.js";
 import {
     getTareas,
@@ -151,11 +151,21 @@ function diasControlHtml(t) {
     `;
 }
 
-/** Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin),
- *  mismos íconos/estilo que ya usa el modal de Publicación:
+/** Crear/Editar/Eliminar contenido es solo Admin — Responsable de
+ *  local/turno solo ejecuta (check, sub-ítems, día, push). El backend
+ *  YA lo bloquea (PERMISOS_ESCRITURA en Code.gs) — esto es además no
+ *  mostrar ni el botón, para no ofrecer una acción que va a fallar. */
+function esAdminActual() {
+    return getUsuarioActual()?.rol === "admin";
+}
+
+/** Fila de acciones al pie de cada tarjeta — Editar/Eliminar, SOLO
+ *  Admin, mismos íconos/estilo que ya usa el modal de Publicación:
  *  .publicacion-accion-icono. Elegir SI la tarea aplica al local vive
- *  en la pestaña "Tareas" (aplicaTareaHtml), no acá. */
+ *  en la pestaña "Tareas" (aplicaTareaHtml), no acá — eso sí es de
+ *  cualquiera. */
 function accionesTareaHtml() {
+    if (!esAdminActual()) return "";
     return `
         <div class="tarea-gestion-acciones">
             <button type="button" class="publicacion-accion-icono" data-editar-tarea title="Editar tarea" aria-label="Editar tarea">${Icon("lapiz", { size: 15 })}</button>
@@ -167,10 +177,9 @@ function accionesTareaHtml() {
 /** "Enviar push" — pedido explícito: avisarle al equipo del local que
  *  se hizo (o se intentó hacer) una tarea, SIN que nadie tenga que
  *  escribir nada. El mensaje dice "Tarea completa"/"Tarea incompleta"
- *  solo — si falta algo, quien lo reciba sabe que hay que revisar la
- *  app, no hace falta detallar qué en el push mismo. Solo en la vista
- *  por día (acá tiene sentido "avisar que ya la hice hoy"), no en el
- *  catálogo de "Tareas". */
+ *  cuando hay algo tildable en ESA tarjeta (checklist o check propio)
+ *  — si no (ej. desde "Tareas", que no tiene nada para tildar), manda
+ *  un aviso neutro en vez de "incompleta" siempre por defecto. */
 function botonPushHtml() {
     return `
         <div class="tarea-gestion-push">
@@ -200,6 +209,7 @@ function aplicaTareaHtml(t) {
             </button>
             <div class="tarea-gestion-subitems">
                 ${diasControlHtml(t)}
+                ${botonPushHtml()}
                 ${accionesTareaHtml()}
             </div>
         </div>
@@ -547,9 +557,11 @@ export async function Gestion() {
                 <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">
                     ${Icon("descargar", { size: 16 })} Exportar a PDF
                 </button>
-                <button type="button" class="btn btn-primary" id="btn-nueva-tarea">
-                    + Nueva tarea
-                </button>
+                ${esAdminActual() ? `
+                    <button type="button" class="btn btn-primary" id="btn-nueva-tarea">
+                        + Nueva tarea
+                    </button>
+                ` : ""}
             </div>
 
             <div class="tabs-gestion" id="tabs-dias-gestion">
@@ -756,9 +768,12 @@ function bindEnviarPush(boton) {
         if (!tarea) return;
 
         const subitems = Array.from(tarjeta.querySelectorAll(".subitem-gestion-check"));
-        const completa = subitems.length
-            ? subitems.every((s) => s.checked)
-            : !!tarjeta.querySelector(".tarea-gestion-check")?.checked;
+        const checkPropio = tarjeta.querySelector(".tarea-gestion-check");
+        // Desde "Tareas" (catálogo) no hay nada tildable en la tarjeta
+        // — ahí no corresponde decir "incompleta" por defecto, es un
+        // aviso neutro nomás.
+        const hayEstado = subitems.length > 0 || !!checkPropio;
+        const completa = subitems.length ? subitems.every((s) => s.checked) : !!checkPropio?.checked;
 
         const textoOriginal = boton.textContent;
         boton.disabled = true;
@@ -769,19 +784,28 @@ function bindEnviarPush(boton) {
             // Pedido explícito: solo Responsable de local/turno, no
             // cualquier colaborador del local — son quienes gestionan
             // esto, no todo el equipo.
-            const destinatarios = colegas
-                .filter((c) => (c.encargado || c.responsableTurno) && c.id !== usuario.id)
-                .map((c) => c.id);
-            if (!destinatarios.length) {
-                alert("No hay otro Responsable de local/turno registrado en tu local para avisar.");
+            const destinatarios = new Set(
+                colegas
+                    .filter((c) => (c.encargado || c.responsableTurno) && c.id !== usuario.id)
+                    .map((c) => c.id),
+            );
+            // PROVISORIO — pedido explícito del usuario: mientras se
+            // confirma que el push realmente le llega a un Responsable
+            // real, sumar también a TODOS los Admin (vos incluido) como
+            // testigo directo, sin depender de relayar por el celular
+            // de otra persona. Sacar esto en cuanto se confirme que
+            // anda con cuentas de Responsable reales.
+            const admins = (await getUsuarios()).filter((u) => u.rol === "admin" && u.id !== usuario.id);
+            admins.forEach((a) => destinatarios.add(a.id));
+
+            if (!destinatarios.size) {
+                alert("No hay otro Responsable de local/turno (ni Admin) registrado para avisar.");
                 return;
             }
-            const r = await mandarPush(
-                destinatarios,
-                tarea.titulo,
-                completa ? "Tarea completa ✅" : "Tarea incompleta ⚠️ — revisá qué falta en la app.",
-                "#/gestion",
-            );
+            const cuerpo = !hayEstado
+                ? "Aviso desde Gestión semanal."
+                : completa ? "Tarea completa ✅" : "Tarea incompleta ⚠️ — revisá qué falta en la app.";
+            const r = await mandarPush(Array.from(destinatarios), tarea.titulo, cuerpo, "#/gestion");
             if (!r?.ok) alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
         } finally {
             boton.disabled = false;
