@@ -44,6 +44,9 @@ import { Icon } from "../components/icons.js";
 import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
+import { getUsuarioActual } from "../services/auth.js";
+import { getColaboradoresPorSucursal } from "../data/usuarios.js";
+import { mandarPush } from "../services/push.js";
 import {
     getTareas,
     crearTarea as crearTareaBackend,
@@ -161,6 +164,21 @@ function accionesTareaHtml() {
     `;
 }
 
+/** "Enviar push" — pedido explícito: avisarle al equipo del local que
+ *  se hizo (o se intentó hacer) una tarea, SIN que nadie tenga que
+ *  escribir nada. El mensaje dice "Tarea completa"/"Tarea incompleta"
+ *  solo — si falta algo, quien lo reciba sabe que hay que revisar la
+ *  app, no hace falta detallar qué en el push mismo. Solo en la vista
+ *  por día (acá tiene sentido "avisar que ya la hice hoy"), no en el
+ *  catálogo de "Tareas". */
+function botonPushHtml() {
+    return `
+        <div class="tarea-gestion-push">
+            <button type="button" class="btn-enviar-push" data-enviar-push>${Icon("campana", { size: 14 })} Enviar push</button>
+        </div>
+    `;
+}
+
 /** Fila de la pestaña "Tareas" — pedido explícito: tocarla DESPLIEGA
  *  los días de la semana ahí mismo (mismo patrón desplegable que
  *  "Pedido a proveedores"), se eligen con las pills, y la tarjeta
@@ -219,6 +237,7 @@ function tareaHtml(t, idUnico) {
                         <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
                     </div>
                 </div>
+                ${botonPushHtml()}
                 ${accionesTareaHtml()}
             </div>
         `;
@@ -234,6 +253,7 @@ function tareaHtml(t, idUnico) {
                     <span>${t.detalle}</span>
                 </span>
             </label>
+            ${botonPushHtml()}
             ${accionesTareaHtml()}
         </div>
     `;
@@ -722,6 +742,54 @@ function bindEliminarTarea(boton) {
     });
 }
 
+/** "Enviar push" — arma el título/cuerpo según el estado ACTUAL en
+ *  pantalla (todos los sub-ítems tildados, o el propio check si es
+ *  una tarea simple) y lo manda a los colegas de la MISMA sucursal
+ *  que quien lo aprieta (mandarPush ya no-opea sola en modo demo). No
+ *  depende de que el check esté persistido (eso es Fase 2) — mide lo
+ *  que hay tildado ahora mismo, tal como se pidió. */
+function bindEnviarPush(boton) {
+    boton.addEventListener("click", async () => {
+        const tarjeta = boton.closest(".tarea-gestion");
+        const idTarea = tarjeta.dataset.tareaId;
+        const tarea = registroTareas.get(idTarea);
+        if (!tarea) return;
+
+        const subitems = Array.from(tarjeta.querySelectorAll(".subitem-gestion-check"));
+        const completa = subitems.length
+            ? subitems.every((s) => s.checked)
+            : !!tarjeta.querySelector(".tarea-gestion-check")?.checked;
+
+        const textoOriginal = boton.textContent;
+        boton.disabled = true;
+        boton.textContent = "Enviando...";
+        try {
+            const usuario = getUsuarioActual();
+            const colegas = usuario?.sucursal ? await getColaboradoresPorSucursal(usuario.sucursal) : [];
+            // Pedido explícito: solo Responsable de local/turno, no
+            // cualquier colaborador del local — son quienes gestionan
+            // esto, no todo el equipo.
+            const destinatarios = colegas
+                .filter((c) => (c.encargado || c.responsableTurno) && c.id !== usuario.id)
+                .map((c) => c.id);
+            if (!destinatarios.length) {
+                alert("No hay otro Responsable de local/turno registrado en tu local para avisar.");
+                return;
+            }
+            const r = await mandarPush(
+                destinatarios,
+                tarea.titulo,
+                completa ? "Tarea completa ✅" : "Tarea incompleta ⚠️ — revisá qué falta en la app.",
+                "#/gestion",
+            );
+            if (!r?.ok) alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
+        } finally {
+            boton.disabled = false;
+            boton.textContent = textoOriginal;
+        }
+    });
+}
+
 /** Le engancha a un nodo (recién insertado por confirmarTarea o
  *  recrearTareaEnPaneles) todo lo que le corresponda según su forma —
  *  mismo resultado que si hubiera venido en el render inicial. */
@@ -730,6 +798,7 @@ function bindTarjetaNueva(nodo) {
     nodo.querySelectorAll(".tarea-gestion-dia-control").forEach(bindDiasControl);
     nodo.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     nodo.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
+    nodo.querySelectorAll("[data-enviar-push]").forEach(bindEnviarPush);
     if (nodo.matches("[data-desplegable]")) bindTarjetaDesplegable(nodo);
 }
 
@@ -767,6 +836,7 @@ export function bindGestion() {
     document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
     document.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     document.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
+    document.querySelectorAll("[data-enviar-push]").forEach(bindEnviarPush);
 
     // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
     // Lecciones: encabezado + sub-tareas sueltas, los días se eligen
