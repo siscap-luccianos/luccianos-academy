@@ -5569,12 +5569,20 @@ table.data-table tbody tr:hover{
     cursor:pointer;
 }
 
-/* Botones sobre la pila de días ("Exportar a PDF" / "+ Nueva tarea"). */
+/* Botones sobre la pila de días ("Exportar a PDF" / "+ Nueva tarea") —
+   .btn de base (padding:12px 20px) queda grande al lado de las pills
+   chicas de días/área que lo rodean. Achicado a la misma proporción
+   que .tab-gestion para que lea como una sola familia de controles,
+   no tres tamaños distintos apilados. */
 .acciones-gestion-semanal{
     display:flex;
     flex-wrap:wrap;
     gap:10px;
     margin-bottom:18px;
+}
+.acciones-gestion-semanal .btn{
+    padding:8px 16px;
+    font-size:13px;
 }
 
 /* Modal "Nueva tarea" — sub-tareas sueltas, mismo espíritu que los

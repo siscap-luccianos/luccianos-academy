@@ -423,8 +423,8 @@ function situacionQueHagoSiHtml(s, idx) {
 =============================*/
 const TABS = [
     { id: "formacion", label: "Formación" },
-    { id: "semanal", label: "Gestión semanal" },
     { id: "quehagosi", label: "¿Qué hago si...?" },
+    { id: "semanal", label: "Gestión semanal" },
 ];
 
 export async function Gestion() {
