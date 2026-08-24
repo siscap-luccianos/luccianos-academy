@@ -44,6 +44,15 @@ y las hojas `Manuales`, `Canales`, `Publicaciones`, `Comentarios`,
 funcionó, así que **no la trates como fuente de verdad** — la fuente real
 es lo que el código pide.
 
+#### `GestionTareas` (Fase 1 de "Responsables de Local y Turno", #/gestion)
+
+Hoja nueva, no está en la tabla original. Encabezados exactos, en este orden:
+
+| `id` | `icono` | `titulo` | `detalle` | `dias` | `subitems` | `fechaModificacion` |
+|---|---|---|---|---|---|---|
+
+`dias` y `subitems` van separados por coma en una sola celda (ej. `Lunes,Viernes` o `Abatidor,Armario,Vitrina`) — mismo criterio ya usado en `aplicaA`/`noAplicaA` de `Cursos`, no un esquema nuevo. `subitems` puede quedar vacío (no todas las tareas tienen sub-ítems). `fechaModificacion` es obligatoria como en cualquier hoja que se escribe desde la app (ver más abajo) — sin ella, `_actualizarCrudo` rechaza la escritura.
+
 Esto importa por cómo escribe el backend: `_actualizarCrudo` busca cada
 campo por **nombre exacto de encabezado**. Si la columna no existe, la
 escritura de ESE campo no tiene dónde ir. Antes se salteaba en silencio

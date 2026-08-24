@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.6.0";
+const BACKEND_VERSION = "1.7.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -60,6 +60,12 @@ const PERMISOS_ESCRITURA = {
     Sucursales:   { crear: ["admin", "supervisor"],              actualizar: ["admin", "supervisor"],              eliminar: ["admin"] },
     Cursos:       { crear: ["admin"],                            actualizar: ["admin"],                            eliminar: ["admin"] },
     Lecciones:    { crear: ["admin"],                            actualizar: ["admin"],                            eliminar: ["admin"] },
+    // Catálogo de tareas de "Gestión semanal" (Responsables de Local y
+    // Turno, #/gestion) — Fase 1: mismo criterio que Cursos/Lecciones,
+    // el contenido lo carga Admin. Lectura abierta a cualquier
+    // autenticado (no está en LECTURA_SOLO_GESTION) — cualquier rol
+    // que entre a esa pantalla necesita poder leer el catálogo.
+    GestionTareas: { crear: ["admin"],                           actualizar: ["admin"],                            eliminar: ["admin"] },
     Evaluaciones: { crear: ["admin"],                            actualizar: ["admin"],                            eliminar: ["admin"] },
     Manuales:     { crear: ["admin"],                            actualizar: ["admin"],                            eliminar: ["admin"] },
     Noticias:     { crear: ["admin"],                            actualizar: ["admin", "colaborador"],            eliminar: ["admin"] },
