@@ -73,7 +73,7 @@ async function renderListaCursos(usuario) {
         getAsignacionesPorColaborador(usuario.id),
     ]);
 
-    // Categoría "Gestión" (hoy solo "Encargados y Responsables") queda
+    // Categoría "Gestión" (hoy solo "Responsables de Local y Turno") queda
     // reservada a colaboradores con encargado:true — un colaborador
     // raso no debería ver ni poder abrir contenido de gestión de local.
     // Supervisor entra sin esa restricción (ve todo el catálogo, solo
@@ -129,7 +129,7 @@ const INTRO_POR_CURSO = {
     "Chocolatería": "Vas a dominar los alfajores, conitos, tabletas y Avella, además de las líneas nuevas de Squares y Latas: variedades, gramajes y vencimientos.",
     "Sistema y Caja": "Vas a aprender el manejo diario del sistema de punto de venta: apertura y cierre de caja, facturación, arqueos y procedimientos operativos del local.",
     "Atención al Cliente": "Vas a aprender a brindar una atención acorde a los estándares de Lucciano's, junto con las normas de higiene e inocuidad alimentaria que aplican a todo el personal.",
-    "Encargados y Responsables": "Vas a conocer las herramientas de gestión de equipo y de local que le corresponden a un responsable de local o de turno.",
+    "Responsables de Local y Turno": "Vas a conocer las herramientas de gestión de equipo y de local que le corresponden a un responsable de local o de turno.",
 };
 
 // Cursos donde el examen se apoya en el catálogo de productos además
