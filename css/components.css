@@ -5609,15 +5609,25 @@ table.data-table tbody tr:hover{
     padding:4px 0;
 }
 
-/* "Ocultar para mi local" — visible en TODAS las tarjetas, no solo
-   las semanales (Reportes fiscales, Control de pedidos, etc. también
-   pueden no aplicarle a un local puntual). */
-.tarea-gestion-ocultar-control{
-    padding:8px 18px 12px;
+/* Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin,
+   íconos, mismo estilo que .publicacion-accion-icono) a la izquierda,
+   "Ocultar para mi local" (cualquiera) a la derecha. Visible en TODAS
+   las tarjetas, no solo las semanales. */
+.tarea-gestion-acciones{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 18px 12px;
     border-top:1px solid var(--line);
 }
 
+.tarea-gestion-acciones .publicacion-accion-icono{
+    width:30px;
+    height:30px;
+}
+
 .btn-ocultar-tarea{
+    margin-left:auto;
     background:none;
     border:none;
     color:var(--muted);
