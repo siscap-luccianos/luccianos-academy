@@ -29,6 +29,7 @@ import { Locales, bindLocales } from "./pages/locales.js";
 import { Alertas } from "./pages/alertas.js";
 import { Supervisores } from "./pages/supervisores.js";
 import { Academia, bindAcademia, EditarLeccion, bindEditarLeccion } from "./pages/academia.js";
+import { Gestion, bindGestion } from "./pages/gestion.js";
 import { Evaluaciones, bindEvaluaciones } from "./pages/evaluaciones.js";
 import { MisEvaluaciones } from "./pages/misEvaluaciones.js";
 import { DashboardEjecutivo, bindDashboard } from "./pages/dashboardEjecutivo.js";
@@ -61,6 +62,7 @@ const RUTAS = {
     supervisores:  { render: Supervisores },
     academia:      { render: Academia, bind: bindAcademia },
     academialeccion: { render: EditarLeccion, bind: bindEditarLeccion },
+    gestion:       { render: Gestion, bind: bindGestion },
     evaluaciones:  { render: Evaluaciones, bind: bindEvaluaciones },
     misevaluaciones: { render: MisEvaluaciones },
     dashboard:     { render: DashboardEjecutivo, bind: bindDashboard },
