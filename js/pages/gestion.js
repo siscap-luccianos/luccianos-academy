@@ -48,7 +48,7 @@ import {
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
-import { getSucursales } from "../data/sucursales.js";
+import { AutocompleteSucursal, bindAutocompleteSucursal } from "../components/autocompleteSucursal.js";
 
 /* ============================
    Gestión semanal — el checklist, por día
@@ -442,15 +442,15 @@ function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
    Página
 =============================*/
 /** Selector de local — SOLO Admin/Supervisor/Capacitador (esVistaLectura).
- *  Responsable de local/turno nunca lo ve: va directo a su sucursal. */
-function selectorLocalHtml(sucursales) {
+ *  Responsable de local/turno nunca lo ve: va directo a su sucursal.
+ *  Buscador con coincidencia en vivo (AutocompleteSucursal, mismo
+ *  componente que usa Colaboradores) — con ~125 locales reales, un
+ *  <select> obligaba a scrollear la lista entera para encontrar uno. */
+function selectorLocalHtml() {
     return `
         <div class="campo-selector-local">
             <label for="selector-local-gestion">${Icon("locales", { size: 15 })} Local</label>
-            <select id="selector-local-gestion">
-                <option value="">Elegí un local…</option>
-                ${sucursales.map((s) => `<option value="${escaparHtml(s.nombre)}"${s.nombre === sucursalActiva ? " selected" : ""}>${escaparHtml(s.nombre)}</option>`).join("")}
-            </select>
+            ${AutocompleteSucursal("selector-local-gestion", sucursalActiva)}
         </div>
     `;
 }
@@ -552,7 +552,6 @@ export async function Gestion() {
     esVistaLectura = usuario?.rol !== "colaborador";
     sucursalActiva = esVistaLectura ? "" : (usuario?.sucursal || "");
 
-    const sucursales = esVistaLectura ? await getSucursales() : [];
     await cargarDatos(sucursalActiva);
 
     return `
@@ -563,7 +562,7 @@ export async function Gestion() {
             <p>Elegí en qué días aplica cada tarea desde "Tareas", tildala como hecha en la vista de cada día, y avisale al equipo con "Enviar push" cuando haga falta.</p>
         </div>
 
-        ${esVistaLectura ? selectorLocalHtml(sucursales) : ""}
+        ${esVistaLectura ? selectorLocalHtml() : ""}
 
         <div id="cuerpo-gestion">${cuerpoGestionHtml()}</div>
     `;
@@ -828,17 +827,21 @@ function bindCuerpoGestion() {
 }
 
 export function bindGestion() {
-    // Selector de local (Admin/Supervisor/Capacitador) — al cambiar,
-    // trae los días de la sucursal elegida y reconstruye SOLO
-    // #cuerpo-gestion (el selector y el aviso de arriba no cambian).
-    document.getElementById("selector-local-gestion")?.addEventListener("change", async (e) => {
-        sucursalActiva = e.target.value;
-        await cargarDatos(sucursalActiva);
-        const cuerpo = document.getElementById("cuerpo-gestion");
-        if (!cuerpo) return;
-        cuerpo.innerHTML = cuerpoGestionHtml();
-        bindCuerpoGestion();
-    });
+    // Selector de local (Admin/Supervisor/Capacitador) — al elegir uno
+    // de la lista filtrada, trae los días de esa sucursal y
+    // reconstruye SOLO #cuerpo-gestion (el selector y el aviso de
+    // arriba no cambian). bindAutocompleteSucursal es async (trae la
+    // lista de locales) — no bloquea el resto del bind.
+    if (document.getElementById("selector-local-gestion")) {
+        bindAutocompleteSucursal("selector-local-gestion", async (nombre) => {
+            sucursalActiva = nombre;
+            await cargarDatos(sucursalActiva);
+            const cuerpo = document.getElementById("cuerpo-gestion");
+            if (!cuerpo) return;
+            cuerpo.innerHTML = cuerpoGestionHtml();
+            bindCuerpoGestion();
+        });
+    }
 
     bindCuerpoGestion();
 }
