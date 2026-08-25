@@ -532,12 +532,7 @@ export async function Gestion() {
     TAREAS.forEach((t) => registroTareas.set(t.id, t));
 
     return `
-        ${Header("Responsables de Local y Turno", "Responsable de local y responsable de turno")}
-
-        <div class="aviso-maqueta">
-            ${Icon("idea", { size: 16 })}
-            <p>Formación y "¿Qué hago si...?" son solo el molde, todavía sin contenido real. El catálogo de "Tareas" ya se guarda de verdad — los checks de "hecho hoy" todavía no, se resetean al recargar.</p>
-        </div>
+        ${Header("Responsables de Local y Turno", "Tareas, formación y guías para el día a día de tu local")}
 
         <div class="tabs-gestion" id="tabs-gestion">
             ${TABS.map((t, i) => `<button class="tab-gestion${i === 0 ? " activa" : ""}" data-vista-gestion="${t.id}">${t.label}</button>`).join("")}
