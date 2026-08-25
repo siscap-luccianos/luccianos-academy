@@ -241,12 +241,6 @@ function tareaHtml(t, idUnico) {
                             <span>${s}</span>
                         </label>
                     `).join("")}
-                    ${esVistaLectura ? "" : `
-                    <div class="subitem-gestion-agregar">
-                        <input type="text" class="input-subitem-nuevo" placeholder="Agregar ítem…">
-                        <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
-                    </div>
-                    `}
                 </div>
                 ${botonPushHtml()}
                 ${accionesTareaHtml()}
@@ -709,39 +703,9 @@ function bindTarjetaDesplegable(tarjeta) {
         }
     }
 
-    // Un solo listener por delegación cubre los checkboxes de siempre
-    // Y los que se agreguen después — no hace falta reenganchar nada
-    // cuando crece la lista.
+    // Un solo listener por delegación cubre todos los checkboxes.
     contenedorSubitems.addEventListener("change", (e) => {
         if (e.target.classList.contains("subitem-gestion-check")) actualizarProgreso();
-    });
-
-    const inputNuevo = tarjeta.querySelector(".input-subitem-nuevo");
-    const filaAgregar = tarjeta.querySelector(".subitem-gestion-agregar");
-
-    function agregarSubitem() {
-        const texto = (inputNuevo.value || "").trim();
-        if (!texto) return;
-        const idNuevo = `subitem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const label = document.createElement("label");
-        label.className = "subitem-gestion";
-        label.setAttribute("for", idNuevo);
-        const chk = document.createElement("input");
-        chk.type = "checkbox";
-        chk.id = idNuevo;
-        chk.className = "subitem-gestion-check";
-        const span = document.createElement("span");
-        span.textContent = texto; // textContent, nunca innerHTML — no confiar en lo que tipeó el usuario acá
-        label.append(chk, span);
-        contenedorSubitems.insertBefore(label, filaAgregar);
-        inputNuevo.value = "";
-        inputNuevo.focus();
-        actualizarProgreso();
-    }
-
-    tarjeta.querySelector("[data-agregar-subitem]")?.addEventListener("click", agregarSubitem);
-    inputNuevo?.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); agregarSubitem(); }
     });
 }
 
