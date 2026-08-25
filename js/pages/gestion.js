@@ -532,13 +532,17 @@ export async function Gestion() {
     TAREAS.forEach((t) => registroTareas.set(t.id, t));
 
     return `
-        ${Header("Responsables de Local y Turno", "Tareas, formación y guías para el día a día de tu local")}
+        ${Header("Gestión semanal", "Tareas, formación y guías para el día a día de tu local")}
 
         <div class="tabs-gestion" id="tabs-gestion">
             ${TABS.map((t, i) => `<button class="tab-gestion${i === 0 ? " activa" : ""}" data-vista-gestion="${t.id}">${t.label}</button>`).join("")}
         </div>
 
         <div data-panel-gestion="formacion">
+            <div class="aviso-maqueta">
+                ${Icon("idea", { size: 16 })}
+                <p>Estas guías se van a ir sumando de a poco. Si te falta algo puntual, consultalo con tu supervisor mientras tanto.</p>
+            </div>
             <div class="section">
                 <div class="lista-temas-formacion">
                     ${TEMAS_FORMACION.map(temaFormacionHtml).join("")}
