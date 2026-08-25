@@ -48,6 +48,7 @@ import {
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
+import { getChecksPorSucursal, guardarCheckSucursal } from "../data/gestionChecks.js";
 import { AutocompleteSucursal, bindAutocompleteSucursal } from "../components/autocompleteSucursal.js";
 
 /* ============================
@@ -86,6 +87,12 @@ const registroTareas = new Map();
  *  sin recargar toda la página — Gestion()/bindGestion() lo leen. */
 let esVistaLectura = false;
 let sucursalActiva = "";
+
+/** "tareaId|dia" → {marcadoPor, hora} — checks "hecho" REALES de la
+ *  sucursal activa (persistidos, ya no visuales). Se puebla en
+ *  cargarDatos() y se usa al renderizar tareaHtml() y al guardar un
+ *  toggle. Ver data/gestionChecks.js. */
+let checksActivos = {};
 
 const ICONOS_TAREA = [
     { valor: "documento", label: "Documento" },
@@ -215,30 +222,35 @@ function aplicaTareaHtml(t) {
     `;
 }
 
-function tareaHtml(t, idUnico) {
+function tareaHtml(t, idUnico, dia) {
     const id = `tarea-${idUnico}`;
     // data-tarea-id va en TODAS las tarjetas — es la identidad que usa
     // Editar/Eliminar/pills-de-día para encontrar todas las copias de
     // esta tarea (una por cada día en t.dias) sin importar el panel.
-    const atrId = ` data-tarea-id="${t.id}"`;
+    // data-dia identifica CUÁL de esos días es esta copia puntual — el
+    // check ahora es real (GestionChecks), por tarea+sucursal+día, así
+    // que hace falta saber cuál para guardar/leer el correcto.
+    const atrId = ` data-tarea-id="${t.id}" data-dia="${dia}"`;
+    const check = checksActivos[`${t.id}|${dia}`];
+    const hechoTexto = check ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
 
     if (t.subitems) {
         return `
-            <div class="tarea-gestion tarea-gestion-desplegable" data-desplegable${atrId}>
+            <div class="tarea-gestion tarea-gestion-desplegable${check ? " hecha" : ""}" data-desplegable${atrId}>
                 <button type="button" class="tarea-gestion-header" data-toggle-desplegable>
                     <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                     <span class="tarea-gestion-txt">
                         <strong>${t.titulo}</strong>
                         <span>${t.detalle}</span>
                     </span>
-                    <span class="tarea-gestion-hora" data-hora></span>
-                    <span class="tarea-gestion-progreso" data-progreso>0/${t.subitems.length}</span>
+                    <span class="tarea-gestion-hora" data-hora>${hechoTexto}</span>
+                    <span class="tarea-gestion-progreso" data-progreso>${check ? t.subitems.length : 0}/${t.subitems.length}</span>
                     <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
                 </button>
                 <div class="tarea-gestion-subitems" data-subitems>
                     ${t.subitems.map((s, is) => `
                         <label class="subitem-gestion" for="${id}-${is}">
-                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check"${esVistaLectura ? " disabled" : ""}>
+                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check"${esVistaLectura ? " disabled" : ""}${check ? " checked" : ""}>
                             <span>${s}</span>
                         </label>
                     `).join("")}
@@ -250,15 +262,15 @@ function tareaHtml(t, idUnico) {
     }
 
     return `
-        <div class="tarea-gestion tarea-gestion-simple"${atrId}>
+        <div class="tarea-gestion tarea-gestion-simple${check ? " hecha" : ""}"${atrId}>
             <label class="tarea-gestion-label" for="${id}">
-                <input type="checkbox" id="${id}" class="tarea-gestion-check"${esVistaLectura ? " disabled" : ""}>
+                <input type="checkbox" id="${id}" class="tarea-gestion-check"${esVistaLectura ? " disabled" : ""}${check ? " checked" : ""}>
                 <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                 <span class="tarea-gestion-txt">
                     <strong>${t.titulo}</strong>
                     <span>${t.detalle}</span>
                 </span>
-                <span class="tarea-gestion-hora" data-hora></span>
+                <span class="tarea-gestion-hora" data-hora>${hechoTexto}</span>
             </label>
             ${botonPushHtml()}
             ${accionesTareaHtml()}
@@ -338,7 +350,7 @@ function recrearTareaEnPaneles(idTarea) {
     tarea.dias.forEach((d) => {
         const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
         if (!lista) return;
-        lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`));
+        lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`, d));
         bindTarjetaNueva(lista.lastElementChild);
     });
     // Cualquier día pudo haber quedado sin nada (se le sacó la última
@@ -555,7 +567,7 @@ function cuerpoGestionHtml() {
                 <div class="section" data-panel-dia="${d}" style="display:none">
                     <h3>${d}</h3>
                     <div class="lista-tareas-gestion">
-                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`)).join("") : avisoDiaVacioHtml()}
+                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
                     </div>
                 </div>
             `;
@@ -569,14 +581,16 @@ function cuerpoGestionHtml() {
  *  como el selector de local al cambiar (bindGestion()), así las dos
  *  vías arman exactamente el mismo estado en memoria. */
 async function cargarDatos(sucursal) {
-    const [catalogo, dias] = await Promise.all([
+    const [catalogo, dias, checks] = await Promise.all([
         getTareas(),
         sucursal ? getDiasPorSucursal(sucursal) : Promise.resolve({}),
+        sucursal ? getChecksPorSucursal(sucursal) : Promise.resolve({}),
     ]);
     TAREAS = catalogo;
     // Se mezclan acá — el resto del archivo sigue leyendo/escribiendo
     // t.dias como siempre, sin saber que ahora viene de otra hoja.
     TAREAS.forEach((t) => { t.dias = dias[t.id] || []; });
+    checksActivos = checks;
     registroTareas.clear();
     TAREAS.forEach((t) => registroTareas.set(t.id, t));
 }
@@ -620,12 +634,29 @@ function horaAhora() {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** Guarda el check DE VERDAD contra GestionChecks — antes era
+ *  puramente visual (bug real: "quien dio el marcado no le aparece al
+ *  otro", dos dispositivos en el mismo local no se veían entre sí).
+ *  Optimista, mismo patrón que bindDiasControl: la pantalla cambia al
+ *  toque, si el backend rechaza se avisa y se revierte. */
 function bindCheckboxHecha(chk) {
     chk.addEventListener("change", () => {
         const tarjeta = chk.closest(".tarea-gestion");
-        tarjeta.classList.toggle("hecha", chk.checked);
+        const tareaId = tarjeta.dataset.tareaId;
+        const dia = tarjeta.dataset.dia;
+        const hechoNuevo = chk.checked;
+
+        tarjeta.classList.toggle("hecha", hechoNuevo);
         const hora = tarjeta.querySelector("[data-hora]");
-        if (hora) hora.textContent = chk.checked ? `Hecho ${horaAhora()}` : "";
+        if (hora) hora.textContent = hechoNuevo ? `Hecho ${horaAhora()}` : "";
+
+        guardarCheckSucursal(tareaId, dia, hechoNuevo, sucursalActiva).then((r) => {
+            if (r?.ok) return;
+            alert(r?.error || "No se pudo guardar — probá de nuevo.");
+            chk.checked = !hechoNuevo;
+            tarjeta.classList.toggle("hecha", !hechoNuevo);
+            if (hora) hora.textContent = !hechoNuevo ? `Hecho ${horaAhora()}` : "";
+        });
     });
 }
 
@@ -701,6 +732,15 @@ function bindTarjetaDesplegable(tarjeta) {
             // la hora sin que haya cambiado el estado real.
             if (completa && !yaEstabaCompleta) hora.textContent = `Hecho ${horaAhora()}`;
             else if (!completa) hora.textContent = "";
+        }
+        // Se guarda DE VERDAD solo cuando el estado completo/incompleto
+        // cambió — se persiste la tarea entera (completa o no), no
+        // sub-ítem por sub-ítem (ver data/gestionChecks.js).
+        if (completa !== yaEstabaCompleta) {
+            guardarCheckSucursal(tarjeta.dataset.tareaId, tarjeta.dataset.dia, completa, sucursalActiva).then((r) => {
+                if (r?.ok) return;
+                alert(r?.error || "No se pudo guardar — probá de nuevo.");
+            });
         }
     }
 

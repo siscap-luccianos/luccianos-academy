@@ -149,3 +149,12 @@ export function enviarPushGestionReal(titulo, cuerpo, url) {
 export function actualizarDiasGestionSucursalReal(tareaId, dias) {
     return gasRequest("actualizarDiasGestionSucursal", { tareaId, dias });
 }
+
+/** Guarda (o borra, si hecho=false) el check "hecho" de una tarea
+ *  para MI sucursal y un día puntual — el backend decide de qué
+ *  sucursal es la fila, mismo criterio que
+ *  actualizarDiasGestionSucursalReal. Ver apps-script/Code.gs,
+ *  actualizarCheckGestion. */
+export function actualizarCheckGestionReal(tareaId, dia, hecho) {
+    return gasRequest("actualizarCheckGestion", { tareaId, dia, hecho });
+}

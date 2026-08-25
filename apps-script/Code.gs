@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.12.0";
+const BACKEND_VERSION = "1.13.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -157,6 +157,7 @@ function _despachar(body, usuarioActual) {
         case "enviarPush": return enviarPush(body.usuarioIds, body.titulo, body.cuerpo, body.url, usuarioActual);
         case "enviarPushGestion": return enviarPushGestion(body.titulo, body.cuerpo, body.url, usuarioActual);
         case "actualizarDiasGestionSucursal": return actualizarDiasGestionSucursal(body.tareaId, body.dias, usuarioActual);
+        case "actualizarCheckGestion": return actualizarCheckGestion(body.tareaId, body.dia, body.hecho, usuarioActual);
         case "enviarPushPrueba": return enviarPushPrueba(usuarioActual);
         case "subirArchivo": return subirArchivo(body.nombreArchivo, body.extension, body.archivoBase64);
         case "subirFotoPerfil": return subirFotoPerfil(usuarioActual, body.extension, body.archivoBase64);
@@ -1230,10 +1231,7 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
  *  Responsable, a propósito. */
 function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
     if (!usuarioActual.encargado && !usuarioActual.responsableTurno) {
-        // DIAGNÓSTICO TEMPORAL (2026-08-25) — sacar apenas se
-        // entienda por qué un usuario con encargado=SI en la Sheet
-        // sigue cayendo acá. Muestra lo que el backend ve DE VERDAD.
-        return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local. [debug: encargado=" + JSON.stringify(usuarioActual.encargado) + " responsableTurno=" + JSON.stringify(usuarioActual.responsableTurno) + " rol=" + JSON.stringify(usuarioActual.rol) + " email=" + JSON.stringify(usuarioActual.email) + "]" };
+        return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local." };
     }
     const sucursal = String(usuarioActual.sucursal || "").trim();
     if (!sucursal) {
@@ -1254,6 +1252,48 @@ function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
     }
     if (!diasTexto) return { ok: true }; // nada que crear si ya arranca vacío
     return _escribirCrudo("GestionTareasSucursal", { tareaId: tareaId, sucursal: sucursal, dias: diasTexto, fechaModificacion: ahora });
+}
+
+/** El check de "hecho" de una tarea, POR SUCURSAL Y POR DÍA — antes
+ *  era puramente visual (vivía en el navegador de quien lo tocaba, se
+ *  perdía al recargar y nunca se veía entre dispositivos distintos:
+ *  bug real reportado en vivo, "quien dio el marcado no le aparece al
+ *  otro"). Hoja "GestionChecks" (id | tareaId | sucursal | dia |
+ *  hecho | marcadoPor | hora | fechaModificacion) — una fila por
+ *  combinación tarea+sucursal+día. Mismo criterio de seguridad que
+ *  actualizarDiasGestionSucursal: el servidor decide la sucursal
+ *  desde usuarioActual, nunca el cliente.
+ *
+ *  Guarda el estado GLOBAL de la tarea (completa o no), no el detalle
+ *  de cada sub-ítem — una tarea con sub-ítems se guarda como
+ *  completa/incompleta en su conjunto, no ítem por ítem. Simplifica
+ *  el modelo y alcanza para lo pedido: saber si YA SE HIZO, no
+ *  reconstruir exactamente cuáles de los sub-ítems. */
+function actualizarCheckGestion(tareaId, dia, hecho, usuarioActual) {
+    if (!usuarioActual.encargado && !usuarioActual.responsableTurno) {
+        return { ok: false, error: "Solo Responsable de local o de turno pueden marcar tareas de su local." };
+    }
+    const sucursal = String(usuarioActual.sucursal || "").trim();
+    if (!sucursal) return { ok: false, error: "Tu usuario no tiene un local asignado." };
+    if (!tareaId || !dia) return { ok: false, error: "Falta la tarea o el día." };
+
+    const filas = _leerCrudo("GestionChecks");
+    const existente = filas.find(function (f) {
+        return String(f.tareaId) === String(tareaId) && String(f.sucursal).trim() === sucursal && String(f.dia) === String(dia);
+    });
+    const ahora = new Date();
+    const hora = Utilities.formatDate(ahora, Session.getScriptTimeZone(), "HH:mm");
+
+    if (!hecho) {
+        // Desmarcar borra la fila — sin fila = "no hecho", mismo
+        // criterio que "sin día elegido" en GestionTareasSucursal.
+        if (existente) return _eliminarCrudo("GestionChecks", existente.id);
+        return { ok: true };
+    }
+
+    const datos = { hecho: "SI", marcadoPor: usuarioActual.nombre || usuarioActual.email, hora: hora, fechaModificacion: ahora.toISOString() };
+    if (existente) return _actualizarCrudo("GestionChecks", existente.id, datos);
+    return _escribirCrudo("GestionChecks", Object.assign({ tareaId: tareaId, sucursal: sucursal, dia: dia }, datos));
 }
 
 function enviarPushPrueba(usuarioActual) {
