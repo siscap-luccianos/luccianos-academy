@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.11.0";
+const BACKEND_VERSION = "1.11.1";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -1225,7 +1225,10 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
  *  Responsable, a propósito. */
 function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
     if (!usuarioActual.encargado && !usuarioActual.responsableTurno) {
-        return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local." };
+        // DIAGNÓSTICO TEMPORAL (2026-08-25) — sacar apenas se
+        // entienda por qué un usuario con encargado=SI en la Sheet
+        // sigue cayendo acá. Muestra lo que el backend ve DE VERDAD.
+        return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local. [debug: encargado=" + JSON.stringify(usuarioActual.encargado) + " responsableTurno=" + JSON.stringify(usuarioActual.responsableTurno) + " rol=" + JSON.stringify(usuarioActual.rol) + " email=" + JSON.stringify(usuarioActual.email) + "]" };
     }
     const sucursal = String(usuarioActual.sucursal || "").trim();
     if (!sucursal) {

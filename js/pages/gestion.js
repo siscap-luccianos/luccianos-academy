@@ -188,6 +188,11 @@ function botonPushHtml() {
  *  ningún día marcado queda gris ("Sin usar") — no hace falta un
  *  interruptor aparte: "aplica" ES "tiene días elegidos". */
 function aplicaTareaHtml(t) {
+    // Admin/Supervisor SIN local elegido todavía: el catálogo (crear/
+    // editar/eliminar tareas) no depende de ningún local — solo los
+    // días sí. Acá se ve la tarea igual, pero sin badge "en uso"/
+    // pills/push (nada de eso tiene sentido sin saber de qué local).
+    const sinLocalElegido = esVistaLectura && !sucursalActiva;
     const enUso = t.dias.length > 0;
     return `
         <div class="tarea-gestion tarea-gestion-desplegable fila-aplica-tarea${enUso ? " en-uso" : ""}" data-desplegable data-tarea-id="${t.id}">
@@ -197,12 +202,12 @@ function aplicaTareaHtml(t) {
                     <strong>${t.titulo}</strong>
                     <span>${t.detalle}</span>
                 </span>
-                <span class="badge-en-uso${enUso ? " activa" : ""}">${enUso ? "En uso" : "Sin usar"}</span>
+                ${sinLocalElegido ? "" : `<span class="badge-en-uso${enUso ? " activa" : ""}">${enUso ? "En uso" : "Sin usar"}</span>`}
                 <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
             </button>
             <div class="tarea-gestion-subitems">
-                ${diasControlHtml(t)}
-                ${botonPushHtml()}
+                ${sinLocalElegido ? `<p class="aviso-tareas-aplicables" style="margin:0">Elegí un local arriba para ver y tocar sus días.</p>` : diasControlHtml(t)}
+                ${sinLocalElegido ? "" : botonPushHtml()}
                 ${accionesTareaHtml()}
             </div>
         </div>
@@ -471,14 +476,31 @@ function cuerpoGestionHtml() {
         </button>
     ` : "";
     const acciones = (botonExportar || botonNueva) ? `<div class="acciones-gestion-semanal">${botonExportar}${botonNueva}</div>` : "";
+    const hayLocal = !esVistaLectura || !!sucursalActiva;
 
-    // Admin/Supervisor sin local elegido todavía — nada que mostrar de
-    // "días" (no existe un esquema único de la red, cada local tiene
-    // el suyo desde Fase 2), pero el catálogo se sigue pudiendo cargar.
-    if (esVistaLectura && !sucursalActiva) {
+    // "Tareas" (catálogo) se ve SIEMPRE, con local elegido o sin él —
+    // Admin no necesita elegir un local para crear/editar/eliminar
+    // tareas del catálogo, eso es global. aplicaTareaHtml() ya sabe
+    // ocultar días/push cuando no hay local (sinLocalElegido).
+    const catalogoHtml = `
+        <div class="section" data-panel-dia="tareas">
+            <p class="aviso-tareas-aplicables">${!hayLocal ? "Elegí un local arriba para ver y tocar sus días." : esVistaLectura ? "Así quedaron elegidos los días de cada tarea en este local." : TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
+            <div class="lista-tareas-gestion" id="lista-aplica-tareas">
+                ${TAREAS.map(aplicaTareaHtml).join("")}
+            </div>
+        </div>
+    `;
+
+    // Sin local elegido (Admin/Supervisor): se ve el catálogo pero no
+    // los tabs de día ni el contenido imprimible — no hay UN esquema
+    // de días sin saber de qué local (cada local tiene el suyo).
+    if (!hayLocal) {
         return `
             ${acciones}
-            <p class="aviso-tareas-aplicables">Elegí un local arriba para ver cómo tiene armada su semana.</p>
+            <div class="tabs-gestion" id="tabs-dias-gestion">
+                <button class="tab-gestion activa" data-vista-dia="tareas">Tareas</button>
+            </div>
+            ${catalogoHtml}
         `;
     }
 
@@ -502,12 +524,7 @@ function cuerpoGestionHtml() {
              FUERA de #contenido-gestion-imprimible: es
              configuración, no algo que se exporte en el PDF del
              día. -->
-        <div class="section" data-panel-dia="tareas">
-            <p class="aviso-tareas-aplicables">${esVistaLectura ? "Así quedaron elegidos los días de cada tarea en este local." : TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
-            <div class="lista-tareas-gestion" id="lista-aplica-tareas">
-                ${TAREAS.map(aplicaTareaHtml).join("")}
-            </div>
-        </div>
+        ${catalogoHtml}
 
         <div id="contenido-gestion-imprimible">
             ${membreteHtml("Guía de Gestión")}
