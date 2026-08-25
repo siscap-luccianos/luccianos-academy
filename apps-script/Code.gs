@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.10.0";
+const BACKEND_VERSION = "1.11.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -855,6 +855,13 @@ function _usuarioDeSesion(email) {
         email: String(fila.email || "").trim().toLowerCase(),
         rol: String(fila.rol || "").trim().toLowerCase(),
         encargado: String(fila.encargado || "").trim().toUpperCase() === "SI",
+        // Faltaba acá (bug real, 2026-08-25): _usuarioDeSesion arma el
+        // usuario en CADA request — enviarPushGestion y
+        // actualizarDiasGestionSucursal miran este flag, así que sin
+        // él un Responsable de turno (sin ser también de local)
+        // fallaba siempre esas acciones, sin relación con su sucursal
+        // ni con nada que hiciera mal.
+        responsableTurno: String(fila.responsableTurno || "").trim().toUpperCase() === "SI",
         capacitador: String(fila.capacitador || "").trim().toUpperCase() === "SI",
         sucursal: String(fila.sucursal || "").trim(),
         foto: String(fila.foto || "").trim(),

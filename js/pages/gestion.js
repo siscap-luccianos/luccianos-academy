@@ -530,7 +530,7 @@ function bindDiasControl(contenedor) {
             // para el guardado optimista en modo demo.
             guardarDiasSucursal(idTarea, tarea.dias, getUsuarioActual()?.sucursal).then((r) => {
                 if (r?.ok) return;
-                alert(`No se pudo guardar el cambio de día para "${tarea.titulo}" — probá de nuevo.`);
+                alert(r?.error || `No se pudo guardar el cambio de día para "${tarea.titulo}" — probá de nuevo.`);
                 // Revertir en memoria y en pantalla al estado de antes del click.
                 if (idx === -1) tarea.dias.splice(tarea.dias.indexOf(dia), 1);
                 else tarea.dias.splice(idx, 0, dia);
