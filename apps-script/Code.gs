@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.11.1";
+const BACKEND_VERSION = "1.12.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -1190,16 +1190,21 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
 
     const miSucursal = String(usuarioActual.sucursal || "").trim().toLowerCase();
     const usuarios = _filasComoObjetos(_sheet("Usuarios"));
-    const destinatarios = usuarios.filter(function (u) {
-        if (String(u.id) === String(usuarioActual.id)) return false; // nunca a uno mismo
+    const otrosResponsables = usuarios.filter(function (u) {
+        if (String(u.id) === String(usuarioActual.id)) return false; // el propio ya se suma aparte, ver abajo
         return miSucursal
             && String(u.sucursal || "").trim().toLowerCase() === miSucursal
             && (String(u.encargado || "").toUpperCase() === "SI" || String(u.responsableTurno || "").toUpperCase() === "SI");
     }).map(function (u) { return u.id; });
 
-    if (!destinatarios.length) {
-        return { ok: false, error: "No hay otro Responsable de local/turno registrado en tu local para avisar." };
-    }
+    // Pedido explícito del usuario (2026-08-25): "ese push debe ir
+    // directo a quien lo envía... para asegurarse de que el mensaje
+    // efectivamente salió" — antes se excluía a uno mismo a propósito;
+    // ahora SIEMPRE se suma el propio id, así quien manda el aviso
+    // recibe su propia confirmación en el celular, sin depender de
+    // tener otra cuenta a mano para verificar que la notificación
+    // realmente llegó a algún lado.
+    const destinatarios = [usuarioActual.id].concat(otrosResponsables);
     return _enviarPushATodos(destinatarios, titulo, cuerpo, url);
 }
 
