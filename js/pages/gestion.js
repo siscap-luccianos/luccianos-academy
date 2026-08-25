@@ -756,10 +756,10 @@ function bindEliminarTarea(boton) {
 /** "Enviar push" — arma el título/cuerpo según el estado ACTUAL en
  *  pantalla (todos los sub-ítems tildados, o el propio check si es
  *  una tarea simple) y lo manda vía mandarPushGestion, que NO recibe
- *  destinatarios — el backend decide solos (los demás Responsables de
- *  la MISMA sucursal + Admin, provisorio). Así lo puede usar
- *  cualquier Responsable de local/turno sin que el cliente tenga que
- *  saber (ni pueda manipular) a quién le llega. No depende de que el
+ *  destinatarios — el backend decide solo (los demás Responsables de
+ *  local/turno de la MISMA sucursal). Así lo puede usar cualquier
+ *  Responsable de local/turno sin que el cliente tenga que saber (ni
+ *  pueda manipular) a quién le llega. No depende de que el
  *  check esté persistido (eso es Fase 2) — mide lo que hay tildado
  *  ahora mismo, tal como se pidió. */
 function bindEnviarPush(boton) {

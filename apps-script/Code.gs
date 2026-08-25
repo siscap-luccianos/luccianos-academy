@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.8.0";
+const BACKEND_VERSION = "1.9.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -1170,9 +1170,9 @@ function enviarPush(usuarioIds, titulo, cuerpo, url, usuarioActual) {
  *  destinatarios — el cliente no manda ninguna lista de ids, así no
  *  hay forma de usarla para avisarle a alguien ajeno a su local.
  *  Destinatarios: los demás Responsables de local/turno de SU MISMA
- *  sucursal + todo Admin (PROVISORIO, para poder confirmar que llega
- *  sin depender del celular de otra persona — sacar cuando se
- *  confirme que anda con cuentas de Responsable reales). */
+ *  sucursal. (Hasta 2026-08-24 sumaba también a todo Admin como
+ *  testigo mientras se confirmaba que llegaba — ya confirmado con
+ *  cuentas reales de Responsable de local y de turno, se sacó.) */
 function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
     const puedeUsar = _esGestion(usuarioActual) || usuarioActual.encargado || usuarioActual.responsableTurno;
     if (!puedeUsar) {
@@ -1184,15 +1184,13 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
     const usuarios = _filasComoObjetos(_sheet("Usuarios"));
     const destinatarios = usuarios.filter(function (u) {
         if (String(u.id) === String(usuarioActual.id)) return false; // nunca a uno mismo
-        const esResponsableMismoLocal = miSucursal
+        return miSucursal
             && String(u.sucursal || "").trim().toLowerCase() === miSucursal
             && (String(u.encargado || "").toUpperCase() === "SI" || String(u.responsableTurno || "").toUpperCase() === "SI");
-        const esAdmin = String(u.rol || "").trim().toLowerCase() === "admin"; // PROVISORIO
-        return esResponsableMismoLocal || esAdmin;
     }).map(function (u) { return u.id; });
 
     if (!destinatarios.length) {
-        return { ok: false, error: "No hay a quién avisar todavía (ni otro Responsable de tu local, ni Admin)." };
+        return { ok: false, error: "No hay otro Responsable de local/turno registrado en tu local para avisar." };
     }
     return _enviarPushATodos(destinatarios, titulo, cuerpo, url);
 }
