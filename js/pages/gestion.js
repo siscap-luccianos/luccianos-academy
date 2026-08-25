@@ -230,6 +230,7 @@ function tareaHtml(t, idUnico) {
                         <strong>${t.titulo}</strong>
                         <span>${t.detalle}</span>
                     </span>
+                    <span class="tarea-gestion-hora" data-hora></span>
                     <span class="tarea-gestion-progreso" data-progreso>0/${t.subitems.length}</span>
                     <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
                 </button>
@@ -262,6 +263,7 @@ function tareaHtml(t, idUnico) {
                     <strong>${t.titulo}</strong>
                     <span>${t.detalle}</span>
                 </span>
+                <span class="tarea-gestion-hora" data-hora></span>
             </label>
             ${botonPushHtml()}
             ${accionesTareaHtml()}
@@ -452,10 +454,16 @@ function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
  *  componente que usa Colaboradores) — con ~125 locales reales, un
  *  <select> obligaba a scrollear la lista entera para encontrar uno. */
 function selectorLocalHtml() {
+    // El botón de limpiar vive siempre en el DOM (oculto por CSS si no
+    // hay local elegido) — el selector se renderiza una sola vez en
+    // Gestion() y NO se reconstruye al elegir un local (solo
+    // #cuerpo-gestion sí), así que mostrarlo/ocultarlo es cosa de
+    // bindGestion(), no de volver a armar este HTML.
     return `
         <div class="campo-selector-local">
             <label for="selector-local-gestion">${Icon("locales", { size: 15 })} Local</label>
             ${AutocompleteSucursal("selector-local-gestion", sucursalActiva)}
+            <button type="button" class="btn-limpiar-local" id="btn-limpiar-local" title="Borrar selección" aria-label="Borrar selección de local"${sucursalActiva ? "" : ' style="display:none"'}>${Icon("cerrar", { size: 14 })}</button>
         </div>
     `;
 }
@@ -482,11 +490,34 @@ function cuerpoGestionHtml() {
     // Admin no necesita elegir un local para crear/editar/eliminar
     // tareas del catálogo, eso es global. aplicaTareaHtml() ya sabe
     // ocultar días/push cuando no hay local (sinLocalElegido).
+    // Segmentado en Activas/No activas — pedido explícito: "si cargo
+    // 50 tareas es un montón de info", con un local elegido (ahí SÍ
+    // hay días reales para decidir quién es activa) separarlas de un
+    // pantallazo evita tener que abrir tarjeta por tarjeta para saber
+    // cuáles están en uso. Sin local elegido no hay "activa" que
+    // decidir (t.dias siempre viene vacío), así que ahí sigue plana.
+    const listaTareasHtml = hayLocal
+        ? (() => {
+            const activas = TAREAS.filter((t) => t.dias.length > 0);
+            const noActivas = TAREAS.filter((t) => t.dias.length === 0);
+            return `
+                ${activas.length ? `
+                    <p class="titulo-grupo-tareas">En uso (${activas.length})</p>
+                    <div class="lista-tareas-gestion">${activas.map(aplicaTareaHtml).join("")}</div>
+                ` : ""}
+                ${noActivas.length ? `
+                    <p class="titulo-grupo-tareas">Sin usar (${noActivas.length})</p>
+                    <div class="lista-tareas-gestion">${noActivas.map(aplicaTareaHtml).join("")}</div>
+                ` : ""}
+            `;
+        })()
+        : `<div class="lista-tareas-gestion">${TAREAS.map(aplicaTareaHtml).join("")}</div>`;
+
     const catalogoHtml = `
         <div class="section" data-panel-dia="tareas">
             <p class="aviso-tareas-aplicables">${!hayLocal ? "Elegí un local arriba para ver y tocar sus días." : esVistaLectura ? "Así quedaron elegidos los días de cada tarea en este local." : TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
-            <div class="lista-tareas-gestion" id="lista-aplica-tareas">
-                ${TAREAS.map(aplicaTareaHtml).join("")}
+            <div id="lista-aplica-tareas">
+                ${listaTareasHtml}
             </div>
         </div>
     `;
@@ -585,9 +616,21 @@ export async function Gestion() {
 // recién creada/editada/movida de día — así una tarjeta siempre se
 // comporta igual, sin duplicar la lógica en dos lugares.
 
+/** "HH:MM" de ahora — pedido explícito: mostrar a qué hora se marcó
+ *  una tarea como hecha. Por ahora es puramente visual, igual que el
+ *  propio check (se resetea al recargar) — persistirlo de verdad
+ *  contra el backend es la Fase pendiente del check por sucursal. */
+function horaAhora() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 function bindCheckboxHecha(chk) {
     chk.addEventListener("change", () => {
-        chk.closest(".tarea-gestion").classList.toggle("hecha", chk.checked);
+        const tarjeta = chk.closest(".tarea-gestion");
+        tarjeta.classList.toggle("hecha", chk.checked);
+        const hora = tarjeta.querySelector("[data-hora]");
+        if (hora) hora.textContent = chk.checked ? `Hecho ${horaAhora()}` : "";
     });
 }
 
@@ -652,7 +695,18 @@ function bindTarjetaDesplegable(tarjeta) {
         const subitems = contenedorSubitems.querySelectorAll(".subitem-gestion-check");
         const hechos = Array.from(subitems).filter((s) => s.checked).length;
         progreso.textContent = `${hechos}/${subitems.length}`;
-        tarjeta.classList.toggle("hecha", subitems.length > 0 && hechos === subitems.length);
+        const completa = subitems.length > 0 && hechos === subitems.length;
+        const yaEstabaCompleta = tarjeta.classList.contains("hecha");
+        tarjeta.classList.toggle("hecha", completa);
+        const hora = tarjeta.querySelector("[data-hora]");
+        if (hora) {
+            // Solo se pisa el horario al COMPLETARSE recién ahora — si
+            // ya estaba completa y se vuelve a marcar (ej. se agregó un
+            // ítem nuevo y se tildó de nuevo), no tiene sentido correr
+            // la hora sin que haya cambiado el estado real.
+            if (completa && !yaEstabaCompleta) hora.textContent = `Hecho ${horaAhora()}`;
+            else if (!completa) hora.textContent = "";
+        }
     }
 
     // Un solo listener por delegación cubre los checkboxes de siempre
@@ -838,28 +892,42 @@ function bindCuerpoGestion() {
     });
 }
 
+/** Cambia de local (o lo borra, con nombre="") — la usan tanto elegir
+ *  uno de la lista filtrada como el botón de limpiar (×). Trae los
+ *  días de la sucursal elegida y reconstruye SOLO #cuerpo-gestion (el
+ *  selector y el aviso de arriba no cambian). */
+async function elegirLocalGestion(nombre) {
+    sucursalActiva = nombre;
+    const botonLimpiar = document.getElementById("btn-limpiar-local");
+    if (botonLimpiar) botonLimpiar.style.display = nombre ? "" : "none";
+    // Aviso de carga inmediato — traer los días de la sucursal pega
+    // contra el backend real (~1-1.5s), sin esto la pantalla quedaba
+    // quieta y no se notaba que estaba haciendo algo.
+    const cuerpoAntes = document.getElementById("cuerpo-gestion");
+    if (cuerpoAntes && nombre) cuerpoAntes.innerHTML = `<p class="aviso-tareas-aplicables">Cargando "${escaparHtml(nombre)}"…</p>`;
+    await cargarDatos(sucursalActiva);
+    const cuerpo = document.getElementById("cuerpo-gestion");
+    if (!cuerpo) return;
+    cuerpo.innerHTML = cuerpoGestionHtml();
+    bindCuerpoGestion();
+}
+
 export function bindGestion() {
-    // Selector de local (Admin/Supervisor/Capacitador) — al elegir uno
-    // de la lista filtrada, trae los días de esa sucursal y
-    // reconstruye SOLO #cuerpo-gestion (el selector y el aviso de
-    // arriba no cambian). bindAutocompleteSucursal es async (trae la
-    // lista de locales) — no bloquea el resto del bind.
+    // Selector de local (Admin/Supervisor/Capacitador) — bindAutocompleteSucursal
+    // es async (trae la lista de locales) — no bloquea el resto del bind.
     if (document.getElementById("selector-local-gestion")) {
-        bindAutocompleteSucursal("selector-local-gestion", async (nombre) => {
-            sucursalActiva = nombre;
-            // Aviso de carga inmediato — traer los días de la sucursal
-            // pega contra el backend real (~1-1.5s), sin esto la
-            // pantalla se quedaba quieta y no se notaba que estaba
-            // haciendo algo.
-            const cuerpoAntes = document.getElementById("cuerpo-gestion");
-            if (cuerpoAntes) cuerpoAntes.innerHTML = `<p class="aviso-tareas-aplicables">Cargando "${escaparHtml(nombre)}"…</p>`;
-            await cargarDatos(sucursalActiva);
-            const cuerpo = document.getElementById("cuerpo-gestion");
-            if (!cuerpo) return;
-            cuerpo.innerHTML = cuerpoGestionHtml();
-            bindCuerpoGestion();
-        });
+        bindAutocompleteSucursal("selector-local-gestion", elegirLocalGestion);
     }
+
+    // Botón "×" — pedido explícito: "que haya un botón de borrar
+    // sucursal para no tener que entrar y borrar todo manual". Limpia
+    // el input Y vuelve al estado sin local elegido, sin tener que
+    // borrar el texto a mano letra por letra.
+    document.getElementById("btn-limpiar-local")?.addEventListener("click", () => {
+        const input = document.getElementById("selector-local-gestion");
+        if (input) input.value = "";
+        elegirLocalGestion("");
+    });
 
     bindCuerpoGestion();
 }
