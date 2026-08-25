@@ -48,6 +48,7 @@ import {
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
+import { getSucursales } from "../data/sucursales.js";
 
 /* ============================
    Gestión semanal — el checklist, por día
@@ -75,6 +76,16 @@ let TAREAS = [];
  *  no adivinarlos leyendo el DOM). Se puebla al renderizar (Gestion())
  *  y se actualiza en cada alta/baja/cambio de día. */
 const registroTareas = new Map();
+
+/** Fase 2 (2026-08-25): Admin/Supervisor/Capacitador entran en modo
+ *  lectura con un selector de local — ven exactamente cómo ese local
+ *  armó su semana, sin poder tocar nada (ni pills, ni checks, ni
+ *  push). Responsable de local/turno (rol "colaborador") nunca ve el
+ *  selector — va directo a SU sucursal, editable como siempre. Estado
+ *  de módulo (no por-request) porque el selector cambia de sucursal
+ *  sin recargar toda la página — Gestion()/bindGestion() lo leen. */
+let esVistaLectura = false;
+let sucursalActiva = "";
 
 const ICONOS_TAREA = [
     { valor: "documento", label: "Documento" },
@@ -112,11 +123,18 @@ function actualizarAvisoDiaVacio(lista) {
  *  <select multiple> (mal en celular) — cada una prende/apaga un día,
  *  siempre visibles, sin abrir ningún modal. */
 function diasControlHtml(t) {
+    // Solo lectura: pills como <span>, sin data-toggle-dia — no hay
+    // nada que enganchar, ni forma de tocarlas por accidente.
     return `
         <div class="tarea-gestion-dia-control">
             <span class="tarea-gestion-dia-label">Días</span>
             <div class="dias-pills-tarea">
-                ${DIAS.map((d) => `<button type="button" class="pill-dia-tarea${t.dias.includes(d) ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${d.slice(0, 2)}</button>`).join("")}
+                ${DIAS.map((d) => {
+                    const activa = t.dias.includes(d);
+                    return esVistaLectura
+                        ? `<span class="pill-dia-tarea${activa ? " activa" : ""}" title="${d}">${d.slice(0, 2)}</span>`
+                        : `<button type="button" class="pill-dia-tarea${activa ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${d.slice(0, 2)}</button>`;
+                }).join("")}
             </div>
         </div>
     `;
@@ -152,6 +170,10 @@ function accionesTareaHtml() {
  *  — si no (ej. desde "Tareas", que no tiene nada para tildar), manda
  *  un aviso neutro en vez de "incompleta" siempre por defecto. */
 function botonPushHtml() {
+    // Solo Responsable de local/turno avisa por push — en modo
+    // lectura (Admin/Supervisor mirando otro local) no corresponde:
+    // el aviso tiene que salir de la gente que gestiona ESE local.
+    if (esVistaLectura) return "";
     return `
         <div class="tarea-gestion-push">
             <button type="button" class="btn-enviar-push" data-enviar-push>${Icon("campana", { size: 14 })} Enviar push</button>
@@ -209,14 +231,16 @@ function tareaHtml(t, idUnico) {
                 <div class="tarea-gestion-subitems" data-subitems>
                     ${t.subitems.map((s, is) => `
                         <label class="subitem-gestion" for="${id}-${is}">
-                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check">
+                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check"${esVistaLectura ? " disabled" : ""}>
                             <span>${s}</span>
                         </label>
                     `).join("")}
+                    ${esVistaLectura ? "" : `
                     <div class="subitem-gestion-agregar">
                         <input type="text" class="input-subitem-nuevo" placeholder="Agregar ítem…">
                         <button type="button" class="btn-agregar-subitem" data-agregar-subitem>+</button>
                     </div>
+                    `}
                 </div>
                 ${botonPushHtml()}
                 ${accionesTareaHtml()}
@@ -227,7 +251,7 @@ function tareaHtml(t, idUnico) {
     return `
         <div class="tarea-gestion tarea-gestion-simple"${atrId}>
             <label class="tarea-gestion-label" for="${id}">
-                <input type="checkbox" id="${id}" class="tarea-gestion-check">
+                <input type="checkbox" id="${id}" class="tarea-gestion-check"${esVistaLectura ? " disabled" : ""}>
                 <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                 <span class="tarea-gestion-txt">
                     <strong>${t.titulo}</strong>
@@ -417,41 +441,54 @@ function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
 /* ============================
    Página
 =============================*/
-export async function Gestion() {
-    // FASE 1+2: catálogo (hoja real) + días de MI sucursal (hoja
-    // aparte) en paralelo — el router ya muestra MascotaCarga()
-    // mientras esto resuelve, no hace falta un loading propio acá.
-    const miSucursal = getUsuarioActual()?.sucursal || "";
-    const [catalogo, misDias] = await Promise.all([getTareas(), getDiasPorSucursal(miSucursal)]);
-    TAREAS = catalogo;
-    // Se mezclan acá — el resto del archivo sigue leyendo/escribiendo
-    // t.dias como siempre, sin saber que ahora viene de otra hoja.
-    TAREAS.forEach((t) => { t.dias = misDias[t.id] || []; });
+/** Selector de local — SOLO Admin/Supervisor/Capacitador (esVistaLectura).
+ *  Responsable de local/turno nunca lo ve: va directo a su sucursal. */
+function selectorLocalHtml(sucursales) {
+    return `
+        <div class="campo-selector-local">
+            <label for="selector-local-gestion">${Icon("locales", { size: 15 })} Local</label>
+            <select id="selector-local-gestion">
+                <option value="">Elegí un local…</option>
+                ${sucursales.map((s) => `<option value="${escaparHtml(s.nombre)}"${s.nombre === sucursalActiva ? " selected" : ""}>${escaparHtml(s.nombre)}</option>`).join("")}
+            </select>
+        </div>
+    `;
+}
 
-    // Puebla el registro (id → tarea real) con lo que arranca cargado
-    // — así "Editar" y las pills de día tienen de dónde leer/escribir
-    // desde el primer render, no solo para lo creado después.
-    registroTareas.clear();
-    TAREAS.forEach((t) => registroTareas.set(t.id, t));
+/** Todo lo que depende de qué local está activo — se reconstruye
+ *  entero cada vez que cambia el selector (Admin/Supervisor) sin
+ *  recargar la página. Para Responsable de local/turno es simplemente
+ *  "su" cuerpo de siempre, una sola vez. */
+function cuerpoGestionHtml() {
+    const botonExportar = sucursalActiva ? `
+        <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">
+            ${Icon("descargar", { size: 16 })} Exportar a PDF
+        </button>
+    ` : "";
+    const botonNueva = esAdminActual() ? `
+        <button type="button" class="btn btn-primary" id="btn-nueva-tarea">
+            + Nueva tarea
+        </button>
+    ` : "";
+    const acciones = (botonExportar || botonNueva) ? `<div class="acciones-gestion-semanal">${botonExportar}${botonNueva}</div>` : "";
+
+    // Admin/Supervisor sin local elegido todavía — nada que mostrar de
+    // "días" (no existe un esquema único de la red, cada local tiene
+    // el suyo desde Fase 2), pero el catálogo se sigue pudiendo cargar.
+    if (esVistaLectura && !sucursalActiva) {
+        return `
+            ${acciones}
+            <p class="aviso-tareas-aplicables">Elegí un local arriba para ver cómo tiene armada su semana.</p>
+        `;
+    }
 
     return `
-        ${Header("Gestión semanal", "Organizá las tareas de tu local, día por día")}
-
-        <div class="aviso-maqueta">
-            ${Icon("idea", { size: 16 })}
-            <p>Elegí en qué días aplica cada tarea desde "Tareas", tildala como hecha en la vista de cada día, y avisale al equipo con "Enviar push" cuando haga falta.</p>
-        </div>
-
-        <div class="acciones-gestion-semanal">
-            <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">
-                ${Icon("descargar", { size: 16 })} Exportar a PDF
-            </button>
-            ${esAdminActual() ? `
-                <button type="button" class="btn btn-primary" id="btn-nueva-tarea">
-                    + Nueva tarea
-                </button>
-            ` : ""}
-        </div>
+        ${esVistaLectura ? `
+            <div class="aviso-solo-lectura">
+                ${Icon("candado", { size: 14 })} Solo lectura — así lo armaron sus Responsables de local/turno.
+            </div>
+        ` : ""}
+        ${acciones}
 
         <div class="tabs-gestion" id="tabs-dias-gestion">
             <button class="tab-gestion activa" data-vista-dia="tareas">Tareas</button>
@@ -466,7 +503,7 @@ export async function Gestion() {
              configuración, no algo que se exporte en el PDF del
              día. -->
         <div class="section" data-panel-dia="tareas">
-            <p class="aviso-tareas-aplicables">${TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
+            <p class="aviso-tareas-aplicables">${esVistaLectura ? "Así quedaron elegidos los días de cada tarea en este local." : TAREAS.length ? "Tocá una tarea para elegir en qué días la necesitás." : "Todavía no hay ninguna tarea cargada — empezá con \"+ Nueva tarea\"."}</p>
             <div class="lista-tareas-gestion" id="lista-aplica-tareas">
                 ${TAREAS.map(aplicaTareaHtml).join("")}
             </div>
@@ -486,6 +523,49 @@ export async function Gestion() {
             `;
             }).join("")}
         </div>
+    `;
+}
+
+/** Trae el catálogo + los días de UNA sucursal (o ninguna) y puebla
+ *  TAREAS/registroTareas — lo usan tanto la carga inicial (Gestion())
+ *  como el selector de local al cambiar (bindGestion()), así las dos
+ *  vías arman exactamente el mismo estado en memoria. */
+async function cargarDatos(sucursal) {
+    const [catalogo, dias] = await Promise.all([
+        getTareas(),
+        sucursal ? getDiasPorSucursal(sucursal) : Promise.resolve({}),
+    ]);
+    TAREAS = catalogo;
+    // Se mezclan acá — el resto del archivo sigue leyendo/escribiendo
+    // t.dias como siempre, sin saber que ahora viene de otra hoja.
+    TAREAS.forEach((t) => { t.dias = dias[t.id] || []; });
+    registroTareas.clear();
+    TAREAS.forEach((t) => registroTareas.set(t.id, t));
+}
+
+export async function Gestion() {
+    const usuario = getUsuarioActual();
+    // Admin/Supervisor/Capacitador (rol !== "colaborador") entran en
+    // modo lectura con selector — nunca tienen "su" sucursal propia
+    // para gestionar. Responsable de local/turno (rol "colaborador")
+    // va directo a la suya, sin selector, editable como siempre.
+    esVistaLectura = usuario?.rol !== "colaborador";
+    sucursalActiva = esVistaLectura ? "" : (usuario?.sucursal || "");
+
+    const sucursales = esVistaLectura ? await getSucursales() : [];
+    await cargarDatos(sucursalActiva);
+
+    return `
+        ${Header("Gestión semanal", "Organizá las tareas de tu local, día por día")}
+
+        <div class="aviso-maqueta">
+            ${Icon("idea", { size: 16 })}
+            <p>Elegí en qué días aplica cada tarea desde "Tareas", tildala como hecha en la vista de cada día, y avisale al equipo con "Enviar push" cuando haga falta.</p>
+        </div>
+
+        ${esVistaLectura ? selectorLocalHtml(sucursales) : ""}
+
+        <div id="cuerpo-gestion">${cuerpoGestionHtml()}</div>
     `;
 }
 
@@ -700,7 +780,10 @@ function bindTarjetaNueva(nodo) {
     if (nodo.matches("[data-desplegable]")) bindTarjetaDesplegable(nodo);
 }
 
-export function bindGestion() {
+/** Todo lo que hay que re-enganchar cada vez que #cuerpo-gestion se
+ *  reconstruye — al cargar la página Y cada vez que Admin/Supervisor
+ *  cambia de local en el selector (mismo contenido, nodos nuevos). */
+function bindCuerpoGestion() {
     // Pills de días (Domingo primero) — único switcher de la pantalla
     // desde que se sacaron las pestañas de área ("Formación"/"¿Qué
     // hago si...?", 2026-08-25).
@@ -724,8 +807,7 @@ export function bindGestion() {
     document.querySelectorAll("[data-enviar-push]").forEach(bindEnviarPush);
 
     // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
-    // Lecciones: encabezado + sub-tareas sueltas, los días se eligen
-    // con checkboxes.
+    // Lecciones: encabezado + sub-tareas sueltas.
     document.getElementById("btn-nueva-tarea")?.addEventListener("click", () => abrirModalTarea());
 
     // "Exportar a PDF" — solo la Gestión semanal (es la única parte
@@ -743,4 +825,20 @@ export function bindGestion() {
         });
         exportarAPdf("contenido-gestion-imprimible", "Guía de Gestión");
     });
+}
+
+export function bindGestion() {
+    // Selector de local (Admin/Supervisor/Capacitador) — al cambiar,
+    // trae los días de la sucursal elegida y reconstruye SOLO
+    // #cuerpo-gestion (el selector y el aviso de arriba no cambian).
+    document.getElementById("selector-local-gestion")?.addEventListener("change", async (e) => {
+        sucursalActiva = e.target.value;
+        await cargarDatos(sucursalActiva);
+        const cuerpo = document.getElementById("cuerpo-gestion");
+        if (!cuerpo) return;
+        cuerpo.innerHTML = cuerpoGestionHtml();
+        bindCuerpoGestion();
+    });
+
+    bindCuerpoGestion();
 }
