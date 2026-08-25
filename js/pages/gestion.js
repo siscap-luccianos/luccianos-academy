@@ -49,6 +49,8 @@ import {
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
 import { getChecksPorSucursal, guardarCheckSucursal } from "../data/gestionChecks.js";
+import { invalidar } from "../services/dataSource.js";
+import { HOJAS } from "../config.js";
 import { AutocompleteSucursal, bindAutocompleteSucursal } from "../components/autocompleteSucursal.js";
 
 /* ============================
@@ -917,6 +919,50 @@ async function elegirLocalGestion(nombre) {
     bindCuerpoGestion();
 }
 
+/** Trae los checks frescos de la sucursal activa y actualiza SOLO los
+ *  checkboxes/clases/horas en el DOM (no reconstruye #cuerpo-gestion)
+ *  — pedido explícito: "no es inmediato... quien recibió lo ve mal".
+ *  Sin esto, la única forma de ver lo que marcó otro dispositivo era
+ *  recargar la página entera, perdiendo el día/tarjeta que tenías
+ *  abierta. Actualiza en el lugar, sin tocar pestañas ni desplegables. */
+async function actualizarChecksEnDOM() {
+    if (!sucursalActiva) return;
+    // Fuerza una lectura REALMENTE fresca — invalidar() acá tira tanto
+    // la caché en memoria (20s) como la marca de frescura de
+    // IndexedDB (hasta 5 min), que si no seguía devolviendo la copia
+    // vieja sin pegarle al backend, aunque este refresco se dispare
+    // cada 20s. Sin esto el "casi en vivo" tardaba hasta 5 min en verse.
+    invalidar(HOJAS.GESTION_CHECKS);
+    let frescos;
+    try {
+        frescos = await getChecksPorSucursal(sucursalActiva);
+    } catch (err) {
+        return; // silencioso — es un refresco de fondo, no una acción del usuario
+    }
+    checksActivos = frescos;
+
+    document.querySelectorAll("#contenido-gestion-imprimible .tarea-gestion[data-tarea-id][data-dia]").forEach((tarjeta) => {
+        const clave = `${tarjeta.dataset.tareaId}|${tarjeta.dataset.dia}`;
+        const check = checksActivos[clave];
+        const hechoTexto = check ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
+        const hora = tarjeta.querySelector("[data-hora]");
+        if (hora) hora.textContent = hechoTexto;
+        tarjeta.classList.toggle("hecha", !!check);
+
+        const checkSimple = tarjeta.querySelector(".tarea-gestion-check");
+        if (checkSimple) checkSimple.checked = !!check;
+
+        const subitems = tarjeta.querySelectorAll(".subitem-gestion-check");
+        if (subitems.length) {
+            subitems.forEach((s) => { s.checked = !!check; });
+            const progreso = tarjeta.querySelector("[data-progreso]");
+            if (progreso) progreso.textContent = `${check ? subitems.length : 0}/${subitems.length}`;
+        }
+    });
+}
+
+let intervaloChecksGestion = null;
+
 export function bindGestion() {
     // Selector de local (Admin/Supervisor/Capacitador) — bindAutocompleteSucursal
     // es async (trae la lista de locales) — no bloquea el resto del bind.
@@ -935,4 +981,19 @@ export function bindGestion() {
     });
 
     bindCuerpoGestion();
+
+    // Refresco en segundo plano de los checks — cada 20s mientras se
+    // esté en esta pantalla, sin recargar nada ni molestar lo que se
+    // esté mirando. Se corta solo apenas el nodo desaparece (se
+    // navegó a otra pantalla) — no hay hook de "salir de la página"
+    // en este router, así que el propio intervalo se autochequea.
+    if (intervaloChecksGestion) clearInterval(intervaloChecksGestion);
+    intervaloChecksGestion = setInterval(() => {
+        if (!document.getElementById("cuerpo-gestion")) {
+            clearInterval(intervaloChecksGestion);
+            intervaloChecksGestion = null;
+            return;
+        }
+        actualizarChecksEnDOM();
+    }, 20000);
 }
