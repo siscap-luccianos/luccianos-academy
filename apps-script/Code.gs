@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.9.0";
+const BACKEND_VERSION = "1.10.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -156,6 +156,7 @@ function _despachar(body, usuarioActual) {
         case "enviarMail": return enviarMailDesdeApp(body.destinatarios, body.asunto, body.cuerpo, usuarioActual);
         case "enviarPush": return enviarPush(body.usuarioIds, body.titulo, body.cuerpo, body.url, usuarioActual);
         case "enviarPushGestion": return enviarPushGestion(body.titulo, body.cuerpo, body.url, usuarioActual);
+        case "actualizarDiasGestionSucursal": return actualizarDiasGestionSucursal(body.tareaId, body.dias, usuarioActual);
         case "enviarPushPrueba": return enviarPushPrueba(usuarioActual);
         case "subirArchivo": return subirArchivo(body.nombreArchivo, body.extension, body.archivoBase64);
         case "subirFotoPerfil": return subirFotoPerfil(usuarioActual, body.extension, body.archivoBase64);
@@ -1193,6 +1194,51 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
         return { ok: false, error: "No hay otro Responsable de local/turno registrado en tu local para avisar." };
     }
     return _enviarPushATodos(destinatarios, titulo, cuerpo, url);
+}
+
+/** "Días" de una tarea, POR SUCURSAL (Fase 2 de Gestión semanal,
+ *  2026-08-25) — separado del catálogo de tareas (hoja
+ *  "GestionTareas", solo Admin), que define QUÉ tareas existen
+ *  (título/ícono/subitems), no en qué días le aplican a cada local.
+ *  Cada sucursal tiene su propio esquema en la hoja
+ *  "GestionTareasSucursal" (id | tareaId | sucursal | dias |
+ *  fechaModificacion) — una fila por combinación tarea+sucursal que
+ *  tenga AL MENOS un día elegido; sin fila = "sin usar" en esa
+ *  sucursal, no hace falta escribir filas vacías para todo el
+ *  catálogo por todos los locales.
+ *
+ *  El SERVIDOR decide de qué sucursal es la fila que se toca —
+ *  usuarioActual.sucursal, nunca un valor que mande el cliente — así
+ *  un Responsable de local no puede, ni por error ni a propósito,
+ *  pisar el esquema de otro local. Mismo criterio de seguridad que
+ *  enviarPushGestion. Admin/Supervisor/Capacitador NO escriben acá —
+ *  ven cualquier sucursal en modo lectura desde el cliente (leyendo
+ *  esta misma hoja entera, sin filtro server-side: no es información
+ *  sensible), pero el esquema de cada local es potestad de SU
+ *  Responsable, a propósito. */
+function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
+    if (!usuarioActual.encargado && !usuarioActual.responsableTurno) {
+        return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local." };
+    }
+    const sucursal = String(usuarioActual.sucursal || "").trim();
+    if (!sucursal) {
+        return { ok: false, error: "Tu usuario no tiene un local asignado." };
+    }
+    if (!tareaId) return { ok: false, error: "Falta la tarea." };
+
+    const filas = _leerCrudo("GestionTareasSucursal");
+    const existente = filas.find(function (f) {
+        return String(f.tareaId) === String(tareaId) && String(f.sucursal).trim() === sucursal;
+    });
+    const diasTexto = (dias || []).join(",");
+    const ahora = new Date().toISOString();
+
+    if (existente) {
+        if (!diasTexto) return _eliminarCrudo("GestionTareasSucursal", existente.id);
+        return _actualizarCrudo("GestionTareasSucursal", existente.id, { dias: diasTexto, fechaModificacion: ahora });
+    }
+    if (!diasTexto) return { ok: true }; // nada que crear si ya arranca vacío
+    return _escribirCrudo("GestionTareasSucursal", { tareaId: tareaId, sucursal: sucursal, dias: diasTexto, fechaModificacion: ahora });
 }
 
 function enviarPushPrueba(usuarioActual) {

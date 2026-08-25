@@ -12,11 +12,19 @@
    ("Sin usar") y no aparece en ningún día real.
 
    FASE 1 del backend (2026-08-24): el catálogo de tareas (crear/
-   editar/eliminar/mover de día) ya persiste de verdad contra la hoja
+   editar/eliminar, sin días) ya persiste de verdad contra la hoja
    "GestionTareas" (data/gestionTareas.js) — no más array hardcodeado.
-   El CHECK de "hecho hoy" sigue siendo puramente visual (se resetea al
-   recargar) — eso es Fase 2, falta decidir cómo se guarda por
-   sucursal.
+
+   FASE 2 (2026-08-25): EN QUÉ DÍAS le aplica cada tarea a CADA
+   sucursal ya no vive en la tarea del catálogo (compartido por toda
+   la red, bug de diseño real) — vive aparte, por sucursal, en la hoja
+   "GestionTareasSucursal" (data/gestionTareasSucursal.js). Acá se
+   siguen manejando como `t.dias` en memoria (mismo shape de siempre,
+   para no reescribir toda la UI) — se MEZCLAN al cargar la página
+   (Gestion(), con los días de MI sucursal) y se GUARDAN aparte
+   (guardarDiasSucursal, no actualizarTareaBackend) al tocar una pill.
+   El CHECK de "hecho hoy" sigue siendo puramente visual (se resetea
+   al recargar) — eso queda para más adelante.
 
    Antes convivía acá, con pestañas propias, el molde sin contenido de
    "Formación" (títulos de tema, todos "Próximamente") y "¿Qué hago
@@ -39,6 +47,7 @@ import {
     actualizarTarea as actualizarTareaBackend,
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
+import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
 
 /* ============================
    Gestión semanal — el checklist, por día
@@ -248,8 +257,11 @@ function subtareaNuevaFilaHtml(texto = "") {
 
 /** Mismo form para crear Y editar — si viene `tarea` precarga sus
  *  valores reales (sacados de registroTareas, no adivinados del DOM). */
+/** Nueva/Editar tarea — catálogo puro (Admin). Los días quedaron
+ *  afuera de este modal desde Fase 2: no son parte de la definición
+ *  de la tarea, son elección de cada local — se eligen con las pills
+ *  de la pestaña "Tareas", no acá. */
 function contenidoModalTarea({ tarea } = {}) {
-    const diasSel = tarea?.dias || ["Domingo"];
     return `
         <label>Título
             <textarea id="input-tarea-titulo" rows="1" placeholder="Ej: Inventario">${escaparHtml(tarea?.titulo || "")}</textarea>
@@ -262,20 +274,6 @@ function contenidoModalTarea({ tarea } = {}) {
                 ${ICONOS_TAREA.map((i) => `<option value="${i.valor}"${i.valor === tarea?.icono ? " selected" : ""}>${i.label}</option>`).join("")}
             </select>
         </label>
-        <div class="campo-dias-modal">
-            <div class="campo-dias-modal-header">
-                <span>Días</span>
-                <button type="button" id="btn-todos-los-dias-modal">Marcar todos</button>
-            </div>
-            <div class="dias-checkbox-grid">
-                ${DIAS.map((d) => `
-                    <label class="dia-checkbox-fila">
-                        <input type="checkbox" class="check-dia-tarea" value="${d}"${diasSel.includes(d) ? " checked" : ""}>
-                        <span>${d}</span>
-                    </label>
-                `).join("")}
-            </div>
-        </div>
         <label class="campo-subtareas-nueva">Sub-tareas (opcional)
             <div id="lista-subtareas-nueva">${(tarea?.subitems || []).map(subtareaNuevaFilaHtml).join("")}</div>
             <button type="button" class="btn-agregar-subtarea-nueva" id="btn-agregar-subtarea-nueva">+ Agregar sub-tarea</button>
@@ -294,15 +292,6 @@ function bindModalTarea() {
         if (e.target.classList.contains("btn-quitar-subtarea-nueva")) {
             e.target.closest(".subtarea-nueva-fila").remove();
         }
-    });
-
-    // "Marcar todos" — atajo para el caso "todos los días", sin tener
-    // que tildar las 7 a mano. Si ya estaban todas tildadas, destilda
-    // todas (toggle), no queda pegado en un solo sentido.
-    const checksDias = Array.from(document.querySelectorAll(".check-dia-tarea"));
-    document.getElementById("btn-todos-los-dias-modal").addEventListener("click", () => {
-        const todosMarcados = checksDias.every((c) => c.checked);
-        checksDias.forEach((c) => { c.checked = !todosMarcados; });
     });
 }
 
@@ -347,15 +336,17 @@ function recrearTareaEnPaneles(idTarea) {
  *  alert, el modal se queda abierto para corregir). El botón
  *  "Guardar" del modal ya muestra "Guardando..." solo mientras esto
  *  está pendiente (abrirModal lo maneja). */
+/** Guarda el catálogo (título/ícono/detalle/sub-ítems) — los días NO
+ *  se tocan acá desde Fase 2: son de cada local, no de la tarea. Al
+ *  editar, se preserva el `dias` que ya tenía cargado en memoria (el
+ *  de MI sucursal, mezclado al entrar a la página) — si no, "Editar"
+ *  el título de una tarea borraría de la pantalla los días que ese
+ *  mismo local ya había elegido (aunque en la Sheet de
+ *  GestionTareasSucursal sigan intactos). */
 async function confirmarTarea(idEditado = null) {
     const titulo = document.getElementById("input-tarea-titulo").value.trim();
     if (!titulo) {
         alert("Ponele un título a la tarea antes de guardar.");
-        return false;
-    }
-    const dias = Array.from(document.querySelectorAll(".check-dia-tarea:checked")).map((c) => c.value);
-    if (!dias.length) {
-        alert("Elegí al menos un día para la tarea.");
         return false;
     }
     const detalle = document.getElementById("input-tarea-detalle").value.trim();
@@ -363,7 +354,7 @@ async function confirmarTarea(idEditado = null) {
     const subitems = Array.from(document.querySelectorAll(".input-subtarea-nueva-texto"))
         .map((t) => t.value.trim())
         .filter(Boolean);
-    const datos = { icono, titulo, detalle, dias, ...(subitems.length ? { subitems } : {}) };
+    const datos = { icono, titulo, detalle, ...(subitems.length ? { subitems } : {}) };
 
     if (idEditado) {
         const r = await actualizarTareaBackend(idEditado, datos);
@@ -371,7 +362,8 @@ async function confirmarTarea(idEditado = null) {
             alert("No se pudo guardar — probá de nuevo.");
             return false;
         }
-        registroTareas.set(idEditado, { id: idEditado, ...datos });
+        const diasPrevios = registroTareas.get(idEditado)?.dias || [];
+        registroTareas.set(idEditado, { id: idEditado, ...datos, dias: diasPrevios });
         TAREAS = TAREAS.map((t) => (t.id === idEditado ? registroTareas.get(idEditado) : t));
         recrearTareaEnPaneles(idEditado);
     } else {
@@ -380,6 +372,7 @@ async function confirmarTarea(idEditado = null) {
             alert("No se pudo crear la tarea — probá de nuevo.");
             return false;
         }
+        nueva.dias = []; // nace "sin usar" en todos los locales.
         registroTareas.set(nueva.id, nueva);
         TAREAS.push(nueva);
         recrearTareaEnPaneles(nueva.id);
@@ -425,10 +418,15 @@ function abrirModalTarea({ idEditado = null, tarea = null } = {}) {
    Página
 =============================*/
 export async function Gestion() {
-    // FASE 1: se lee de la hoja real en cada entrada a la página — el
-    // router ya muestra MascotaCarga() mientras esto resuelve, no hace
-    // falta un loading propio acá.
-    TAREAS = await getTareas();
+    // FASE 1+2: catálogo (hoja real) + días de MI sucursal (hoja
+    // aparte) en paralelo — el router ya muestra MascotaCarga()
+    // mientras esto resuelve, no hace falta un loading propio acá.
+    const miSucursal = getUsuarioActual()?.sucursal || "";
+    const [catalogo, misDias] = await Promise.all([getTareas(), getDiasPorSucursal(miSucursal)]);
+    TAREAS = catalogo;
+    // Se mezclan acá — el resto del archivo sigue leyendo/escribiendo
+    // t.dias como siempre, sin saber que ahora viene de otra hoja.
+    TAREAS.forEach((t) => { t.dias = misDias[t.id] || []; });
 
     // Puebla el registro (id → tarea real) con lo que arranca cargado
     // — así "Editar" y las pills de día tienen de dónde leer/escribir
@@ -526,7 +524,11 @@ function bindDiasControl(contenedor) {
             const idx = tarea.dias.indexOf(dia);
             if (idx === -1) tarea.dias.push(dia); else tarea.dias.splice(idx, 1);
             recrearTareaEnPaneles(idTarea);
-            actualizarTareaBackend(idTarea, tarea).then((r) => {
+            // Fase 2: se guarda en GestionTareasSucursal (mi sucursal),
+            // no en el catálogo — el backend decide de qué sucursal es
+            // la fila (usuarioActual.sucursal), este valor es solo
+            // para el guardado optimista en modo demo.
+            guardarDiasSucursal(idTarea, tarea.dias, getUsuarioActual()?.sucursal).then((r) => {
                 if (r?.ok) return;
                 alert(`No se pudo guardar el cambio de día para "${tarea.titulo}" — probá de nuevo.`);
                 // Revertir en memoria y en pantalla al estado de antes del click.

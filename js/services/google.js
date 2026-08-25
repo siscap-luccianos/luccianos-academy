@@ -140,3 +140,12 @@ export function enviarPushReal(usuarioIds, titulo, cuerpo, url) {
 export function enviarPushGestionReal(titulo, cuerpo, url) {
     return gasRequest("enviarPushGestion", { titulo, cuerpo, url });
 }
+
+/** Guarda los días de UNA tarea para la sucursal de quien llama (Fase
+ *  2 de Gestión semanal) — el backend decide de qué sucursal es la
+ *  fila (usuarioActual.sucursal), nunca un valor que mande el
+ *  cliente. Solo Responsable de local/turno pueden llamarla — ver
+ *  apps-script/Code.gs, actualizarDiasGestionSucursal. */
+export function actualizarDiasGestionSucursalReal(tareaId, dias) {
+    return gasRequest("actualizarDiasGestionSucursal", { tareaId, dias });
+}
