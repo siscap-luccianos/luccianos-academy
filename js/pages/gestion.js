@@ -191,7 +191,9 @@ function aplicaTareaHtml(t) {
     // Admin/Supervisor SIN local elegido todavía: el catálogo (crear/
     // editar/eliminar tareas) no depende de ningún local — solo los
     // días sí. Acá se ve la tarea igual, pero sin badge "en uso"/
-    // pills/push (nada de eso tiene sentido sin saber de qué local).
+    // pills (no tienen sentido sin saber de qué local). El push NO va
+    // acá — pedido explícito: "Tareas" es donde se ASIGNA el día, el
+    // push se manda desde la vista de cada día, ejecutando.
     const sinLocalElegido = esVistaLectura && !sucursalActiva;
     const enUso = t.dias.length > 0;
     return `
@@ -207,7 +209,6 @@ function aplicaTareaHtml(t) {
             </button>
             <div class="tarea-gestion-subitems">
                 ${sinLocalElegido ? `<p class="aviso-tareas-aplicables" style="margin:0">Elegí un local arriba para ver y tocar sus días.</p>` : diasControlHtml(t)}
-                ${sinLocalElegido ? "" : botonPushHtml()}
                 ${accionesTareaHtml()}
             </div>
         </div>
