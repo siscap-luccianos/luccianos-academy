@@ -492,7 +492,11 @@ async function renderDetalleCurso(usuario, cursoId) {
     const leccionesOpcionales = lecciones.filter((l) => l.obligatoria === "NO");
 
     const curso = cursos.find((c) => String(c.id) === String(cursoId));
-    const esSoloEncargados = curso && curso.categoria === "Gestión" && !usuario.encargado && usuario.rol !== "supervisor";
+    // Admin queda afuera del bloqueo igual que Supervisor: entra desde
+    // "Vista previa" en Academia para cargar/revisar contenido, no
+    // porque sea Responsable de local — bug real reportado en vivo
+    // ("de admin no me deja").
+    const esSoloEncargados = curso && curso.categoria === "Gestión" && !usuario.encargado && usuario.rol !== "supervisor" && usuario.rol !== "admin";
     // Sin esto, un curso acotado a otro país desaparecía del catálogo
     // pero seguía abriéndose pegando el link — se esconde y se bloquea,
     // no solo se esconde.
