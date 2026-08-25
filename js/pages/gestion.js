@@ -505,11 +505,6 @@ function cuerpoGestionHtml() {
     }
 
     return `
-        ${esVistaLectura ? `
-            <div class="aviso-solo-lectura">
-                ${Icon("candado", { size: 14 })} Solo lectura — así lo armaron sus Responsables de local/turno.
-            </div>
-        ` : ""}
         ${acciones}
 
         <div class="tabs-gestion" id="tabs-dias-gestion">
@@ -852,6 +847,12 @@ export function bindGestion() {
     if (document.getElementById("selector-local-gestion")) {
         bindAutocompleteSucursal("selector-local-gestion", async (nombre) => {
             sucursalActiva = nombre;
+            // Aviso de carga inmediato — traer los días de la sucursal
+            // pega contra el backend real (~1-1.5s), sin esto la
+            // pantalla se quedaba quieta y no se notaba que estaba
+            // haciendo algo.
+            const cuerpoAntes = document.getElementById("cuerpo-gestion");
+            if (cuerpoAntes) cuerpoAntes.innerHTML = `<p class="aviso-tareas-aplicables">Cargando "${escaparHtml(nombre)}"…</p>`;
             await cargarDatos(sucursalActiva);
             const cuerpo = document.getElementById("cuerpo-gestion");
             if (!cuerpo) return;
