@@ -156,7 +156,7 @@ function _despachar(body, usuarioActual) {
         case "enviarMail": return enviarMailDesdeApp(body.destinatarios, body.asunto, body.cuerpo, usuarioActual);
         case "enviarPush": return enviarPush(body.usuarioIds, body.titulo, body.cuerpo, body.url, usuarioActual);
         case "enviarPushGestion": return enviarPushGestion(body.titulo, body.cuerpo, body.url, usuarioActual);
-        case "actualizarDiasGestionSucursal": return actualizarDiasGestionSucursal(body.tareaId, body.dias, usuarioActual);
+        case "actualizarDiasGestionSucursal": return actualizarDiasGestionSucursal(body.tareaId, body.dias, body.frecuencia, usuarioActual);
         case "actualizarCheckGestion": return actualizarCheckGestion(body.tareaId, body.dia, body.hecho, usuarioActual);
         case "enviarPushPrueba": return enviarPushPrueba(usuarioActual);
         case "subirArchivo": return subirArchivo(body.nombreArchivo, body.extension, body.archivoBase64);
@@ -1215,10 +1215,14 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
  *  (título/ícono/subitems), no en qué días le aplican a cada local.
  *  Cada sucursal tiene su propio esquema en la hoja
  *  "GestionTareasSucursal" (id | tareaId | sucursal | dias |
- *  fechaModificacion) — una fila por combinación tarea+sucursal que
- *  tenga AL MENOS un día elegido; sin fila = "sin usar" en esa
- *  sucursal, no hace falta escribir filas vacías para todo el
- *  catálogo por todos los locales.
+ *  frecuencia | fechaModificacion) — una fila por combinación
+ *  tarea+sucursal que tenga AL MENOS un día elegido; sin fila = "sin
+ *  usar" en esa sucursal, no hace falta escribir filas vacías para
+ *  todo el catálogo por todos los locales. "frecuencia" (2026-08-26)
+ *  es "semanal" o "mensual" — decide si "dias" son nombres de día
+ *  ("Lunes") o números de día del mes ("20") PARA ESE LOCAL. Vive acá
+ *  y no en el catálogo (GestionTareas) a propósito: la decide cada
+ *  Responsable al asignar, no Admin al cargar la tarea.
  *
  *  El SERVIDOR decide de qué sucursal es la fila que se toca —
  *  usuarioActual.sucursal, nunca un valor que mande el cliente — así
@@ -1229,7 +1233,7 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
  *  esta misma hoja entera, sin filtro server-side: no es información
  *  sensible), pero el esquema de cada local es potestad de SU
  *  Responsable, a propósito. */
-function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
+function actualizarDiasGestionSucursal(tareaId, dias, frecuencia, usuarioActual) {
     if (!usuarioActual.encargado && !usuarioActual.responsableTurno) {
         return { ok: false, error: "Solo Responsable de local o de turno pueden editar los días de su local." };
     }
@@ -1244,14 +1248,20 @@ function actualizarDiasGestionSucursal(tareaId, dias, usuarioActual) {
         return String(f.tareaId) === String(tareaId) && String(f.sucursal).trim() === sucursal;
     });
     const diasTexto = (dias || []).join(",");
+    // "semanal" o "mensual" — pedido explícito (2026-08-26): la
+    // frecuencia la decide CADA LOCAL al asignar, no el catálogo
+    // (Admin solo carga título/ícono/detalle, "no tengo que estar
+    // modificando nada"). Mismo criterio que "dias": vive acá, por
+    // sucursal, no en GestionTareas.
+    const frecuenciaTexto = frecuencia === "mensual" ? "mensual" : "semanal";
     const ahora = new Date().toISOString();
 
     if (existente) {
         if (!diasTexto) return _eliminarCrudo("GestionTareasSucursal", existente.id);
-        return _actualizarCrudo("GestionTareasSucursal", existente.id, { dias: diasTexto, fechaModificacion: ahora });
+        return _actualizarCrudo("GestionTareasSucursal", existente.id, { dias: diasTexto, frecuencia: frecuenciaTexto, fechaModificacion: ahora });
     }
     if (!diasTexto) return { ok: true }; // nada que crear si ya arranca vacío
-    return _escribirCrudo("GestionTareasSucursal", { tareaId: tareaId, sucursal: sucursal, dias: diasTexto, fechaModificacion: ahora });
+    return _escribirCrudo("GestionTareasSucursal", { tareaId: tareaId, sucursal: sucursal, dias: diasTexto, frecuencia: frecuenciaTexto, fechaModificacion: ahora });
 }
 
 /** El check de "hecho" de una tarea, POR SUCURSAL Y POR DÍA — antes

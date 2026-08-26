@@ -49,22 +49,18 @@ function normalizarTarea(f) {
         // Vacío = aplica a TODOS. La exclusión (noAplicaA) gana.
         aplicaA: String(f.aplicaA || "").trim(),
         noAplicaA: String(f.noAplicaA || "").trim(),
-        // "semanal" (default) o "mensual" — pedido explícito: tareas
-        // como "controlar vencimiento de matafuego el 20" no encajan
-        // en el patrón de día-de-semana. Decide si t.dias (per-
-        // sucursal, ver gestionTareasSucursal.js) se interpreta como
-        // nombres de día ("Lunes") o números de día del mes ("20") —
-        // MISMA columna "dias" en las dos hojas involucradas, ningún
-        // esquema nuevo ahí, la diferencia es solo de interpretación
-        // en gestion.js según este campo. Celdas viejas sin esta
-        // columna (o con cualquier otro valor) caen a "semanal", el
-        // comportamiento de siempre.
-        frecuencia: f.frecuencia === "mensual" ? "mensual" : "semanal",
+        // NO se lee "frecuencia" acá — se probó un rato viviendo en el
+        // catálogo (2026-08-26) pero se movió a data/gestionTareasSucursal.js:
+        // pedido explícito del usuario, Admin: "yo cargo la tarea, ellos
+        // deciden si es mensual o semanal, no tengo que estar
+        // modificando nada". Una columna "frecuencia" puede haber
+        // quedado en la Sheet de ese intento — queda inerte a propósito,
+        // mismo criterio que la columna vieja "dias" (ver arriba).
     };
 }
 
 /** subitems de array a string separado por coma, para la Sheet. */
-function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA, frecuencia }) {
+function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA }) {
     return {
         icono,
         titulo,
@@ -72,7 +68,6 @@ function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA, frec
         subitems: (subitems || []).join(","),
         aplicaA: aplicaA || "",
         noAplicaA: noAplicaA || "",
-        frecuencia: frecuencia === "mensual" ? "mensual" : "semanal",
     };
 }
 
