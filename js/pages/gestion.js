@@ -815,18 +815,27 @@ function cuerpoGestionHtml() {
     const pillsDiaHtml = DIAS_VISUAL.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d} ${fechaDelDiaSemana(d)}</button>`).join("")
         + diasMesConContenido.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}/${mesActual}</button>`).join("");
 
-    // Push + Exportar, JUNTOS y por FUERA de la tarjeta de la tarea —
-    // antes "Enviar push" vivía metido adentro de cada tarjeta (uno
-    // por tarea); pedido explícito con captura real: "el push está
-    // sobre la tarea y en el mockup está por fuera, con una pill
-    // linda premium, y exportar justo al lado". Ahora es UNA fila
-    // compartida al pie de las pills de día, un solo push por PANEL
+    // Push + Exportar, JUNTOS y por FUERA de la tarjeta de la tarea, AL
+    // PIE de las tareas del día (no arriba, pegado a las pills) —
+    // pedido explícito con captura real, dos rondas: primero "el push
+    // está sobre la tarea y en el mockup está por fuera, con una pill
+    // linda premium, y exportar justo al lado" (sacado de la tarjeta),
+    // después "el push y exportar está abajo en el mock, no arriba"
+    // (reubicado debajo de #contenido-gestion-imprimible, mismo lugar
+    // que .acciones-panel en el mockup). Un solo push por PANEL
     // (resume el estado de todas las tareas de ESE día) en vez de uno
     // por tarea — arranca oculta, bindCuerpoGestion() la muestra al
     // tocar una pill de día.
-    const botonPushDia = esVistaLectura ? "" : `
-        <button type="button" class="btn-enviar-push" id="btn-enviar-push-dia">${Icon("campana", { size: 14 })} Enviar push</button>
-    `;
+    //
+    // El botón de push vive envuelto en #push-dia-wrap porque, al
+    // tocarlo, su contenido se reemplaza por un banner de confirmación
+    // en vez de mandar directo — pedido explícito: "sumar un banner
+    // enviar, así si presiono por error lo revierte" (ver
+    // bindPushDiaWrap). Exportar no lo necesita, no manda nada a nadie.
+    // Vacío a propósito: bindPushDiaWrap() lo pinta apenas se
+    // engancha (mismo criterio que un componente que se hidrata solo,
+    // evita pintar el botón acá Y de nuevo al bindear).
+    const botonPushDia = esVistaLectura ? "" : `<div class="push-dia-wrap" id="push-dia-wrap"></div>`;
     const botonExportarDia = sucursalActiva ? `
         <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">${Icon("descargar", { size: 16 })} Exportar a PDF</button>
     ` : "";
@@ -852,18 +861,19 @@ function cuerpoGestionHtml() {
         </div>
 
         <!-- "Tareas asignadas": pills de día/fecha — tocás una, ves
-             las tareas de ESE día, las marcás hechas, exportás o
-             avisás por push. Vive el contenido exportable
-             (#contenido-gestion-imprimible), "Asignar tareas" no. -->
+             las tareas de ESE día, las marcás hechas. Push/Exportar
+             van AL PIE, después del contenido exportable
+             (#contenido-gestion-imprimible), mismo orden que el
+             mockup — "Asignar tareas" no tiene nada de esto. -->
         <div id="seccion-tareas-asignadas"${vistaSeccion === "ejecutar" ? "" : ' style="display:none"'}>
             <div class="tabs-gestion" id="tabs-dias-gestion">
                 ${pillsDiaHtml}
             </div>
-            ${accionesDiaHtml}
             <div id="contenido-gestion-imprimible">
                 ${membreteHtml("Guía de Gestión", sucursalActiva)}
                 ${panelesSemanalesHtml}${panelesMensualesHtml}
             </div>
+            ${accionesDiaHtml}
         </div>
     `;
 }
@@ -1142,8 +1152,34 @@ function bindEliminarTarea(boton) {
     });
 }
 
-/** "Enviar push" — UN botón compartido al pie de las pills de día
- *  (no uno por tarea, ver el comentario en cuerpoGestionHtml). Arma
+/** Botón normal de "Enviar push" — estado por defecto de #push-dia-
+ *  wrap. Separado en su propia función porque bindPushDiaWrap() lo
+ *  vuelve a pintar cada vez que se cancela la confirmación o termina
+ *  un envío (ver más abajo). */
+function pushDiaBotonHtml() {
+    return `<button type="button" class="btn-enviar-push" id="btn-enviar-push-dia">${Icon("campana", { size: 14 })} Enviar push</button>`;
+}
+
+/** Banner de confirmación — pedido explícito: "sumar un banner
+ *  enviar, así si presiono por error lo revierte". Reemplaza al botón
+ *  DENTRO de #push-dia-wrap en vez de abrir un modal aparte: mismo
+ *  lugar, un toque menos que cancelar un popup. */
+function pushDiaBannerHtml() {
+    return `
+        <div class="banner-confirmar-push">
+            <span>¿Enviar push a todo el equipo?</span>
+            <div class="banner-confirmar-push-botones">
+                <button type="button" class="btn-cancelar-push" id="btn-cancelar-push">Cancelar</button>
+                <button type="button" class="btn-confirmar-push" id="btn-confirmar-push">Confirmar envío</button>
+            </div>
+        </div>
+    `;
+}
+
+/** "Enviar push" — UN wrap compartido al pie de las tareas del día
+ *  (no uno por tarea, ver el comentario en cuerpoGestionHtml). Tocar
+ *  "Enviar push" NO manda nada todavía: cambia el botón por un banner
+ *  de confirmación (pushDiaBannerHtml) — solo "Confirmar envío" arma
  *  el título/cuerpo según el estado ACTUAL de TODAS las tareas del
  *  panel del día activo (diaActivo/diaActivoEtiqueta, ver el handler
  *  de data-vista-dia más abajo) y lo manda vía mandarPushGestion, que
@@ -1154,13 +1190,28 @@ function bindEliminarTarea(boton) {
  *
  *  Pedido explícito: "el nombre de usuario debería estar al enviar el
  *  push, esté completa o incompleta la tarea, porque así se sabe
- *  quién envió ese push" — se suma la firma de quien lo manda, sea
- *  cual sea el resultado. */
-function bindEnviarPushDia(boton) {
-    boton.addEventListener("click", async () => {
-        if (!diaActivo) return;
+ *  quién envió ese push" — va en el TÍTULO, no al final del cuerpo:
+ *  reportado en vivo que con la tarea incompleta (cuerpo ya largo,
+ *  "Tareas incompletas ⚠️ — revisá qué falta en la app.") la firma
+ *  quedaba afuera de la vista previa colapsada de Android, que corta
+ *  el cuerpo a una sola línea. El título no se corta así. */
+function bindPushDiaWrap(wrap) {
+    function pintarBoton() {
+        wrap.innerHTML = pushDiaBotonHtml();
+        wrap.querySelector("#btn-enviar-push-dia").addEventListener("click", pintarBanner);
+    }
+
+    function pintarBanner() {
+        wrap.innerHTML = pushDiaBannerHtml();
+        wrap.querySelector("#btn-cancelar-push").addEventListener("click", pintarBoton);
+        wrap.querySelector("#btn-confirmar-push").addEventListener("click", enviar);
+    }
+
+    async function enviar() {
+        const boton = wrap.querySelector("#btn-confirmar-push");
+        if (!diaActivo) { pintarBoton(); return; }
         const panel = document.querySelector(`[data-panel-dia="${diaActivo}"]`);
-        if (!panel) return;
+        if (!panel) { pintarBoton(); return; }
 
         const checks = Array.from(panel.querySelectorAll(".subitem-gestion-check, .tarea-gestion-check"));
         // Sin nada tildable en el panel (día vacío) no corresponde
@@ -1169,31 +1220,32 @@ function bindEnviarPushDia(boton) {
         const completa = hayEstado && checks.every((c) => c.checked);
 
         const usuario = getUsuarioActual();
-        const firma = usuario?.nombre ? ` · ${usuario.nombre}` : "";
-        const textoOriginal = boton.textContent;
-        let enviado = false;
+        const titulo = usuario?.nombre ? `${usuario.nombre} · ${diaActivoEtiqueta || "Gestión de tareas"}` : (diaActivoEtiqueta || "Gestión de tareas");
+
         boton.disabled = true;
         boton.textContent = "Enviando...";
         try {
-            const cuerpo = (!hayEstado
+            const cuerpo = !hayEstado
                 ? "Aviso desde Gestión de tareas."
-                : completa ? "Tareas completas ✅" : "Tareas incompletas ⚠️ — revisá qué falta en la app.") + firma;
-            const r = await mandarPushGestion(diaActivoEtiqueta || "Gestión de tareas", cuerpo, "#/gestion");
+                : completa ? "Tareas completas ✅" : "Tareas incompletas ⚠️ — revisá qué falta en la app.";
+            const r = await mandarPushGestion(titulo, cuerpo, "#/gestion");
             if (!r?.ok) {
                 alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
+                pintarBoton();
                 return;
             }
             // Confirmación visible de que SÍ salió — antes quedaba
             // mudo en el caso de éxito, indistinguible de "no hizo
             // nada" (pedido explícito: "no se sabe si se envió").
-            enviado = true;
-            boton.textContent = "✓ Enviado";
-            setTimeout(() => { boton.textContent = textoOriginal; }, 2000);
-        } finally {
-            boton.disabled = false;
-            if (!enviado) boton.textContent = textoOriginal;
+            wrap.innerHTML = `<button type="button" class="btn-enviar-push" disabled>✓ Enviado</button>`;
+            setTimeout(pintarBoton, 2000);
+        } catch (err) {
+            alert("No se pudo enviar el push — probá de nuevo.");
+            pintarBoton();
         }
-    });
+    }
+
+    pintarBoton();
 }
 
 /** Le engancha a un nodo (recién insertado por confirmarTarea o
@@ -1256,8 +1308,8 @@ function bindCuerpoGestion() {
     document.querySelectorAll("[data-desplegable]").forEach(bindTarjetaDesplegable);
     document.querySelectorAll("[data-editar-tarea]").forEach(bindEditarTarea);
     document.querySelectorAll("[data-eliminar-tarea]").forEach(bindEliminarTarea);
-    const btnPushDia = document.getElementById("btn-enviar-push-dia");
-    if (btnPushDia) bindEnviarPushDia(btnPushDia);
+    const pushDiaWrap = document.getElementById("push-dia-wrap");
+    if (pushDiaWrap) bindPushDiaWrap(pushDiaWrap);
 
     // "+ Nueva tarea" (admin) — mismo patrón que ya existe en
     // Lecciones: encabezado + sub-tareas sueltas.

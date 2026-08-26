@@ -5795,12 +5795,14 @@ table.data-table tbody tr:hover{
     padding:4px 0;
 }
 
-/* Fila compartida "Enviar push" + "Exportar a PDF", al pie de las
-   pills de día dentro de "Tareas asignadas" — por FUERA de la
-   tarjeta de la tarea a propósito. Pedido explícito con captura real:
-   "el push está sobre la tarea y en el mockup está por fuera, con una
-   pill linda premium, y exportar justo al lado". Arranca oculta
-   (inline style), bindCuerpoGestion() la muestra al tocar una pill. */
+/* Fila compartida "Enviar push" + "Exportar a PDF", al PIE de las
+   tareas del día activo (después de #contenido-gestion-imprimible) —
+   por FUERA de la tarjeta de la tarea, pedido explícito en dos
+   rondas: "el push está sobre la tarea y en el mockup está por
+   fuera, con una pill linda premium, y exportar justo al lado", y
+   después "está abajo en el mock, no arriba" (reubicada). Arranca
+   oculta (inline style), bindCuerpoGestion() la muestra al tocar una
+   pill de día. */
 .acciones-dia-gestion{
     display:flex;
     flex-wrap:wrap;
@@ -5833,6 +5835,59 @@ table.data-table tbody tr:hover{
 }
 .btn-enviar-push:hover{ background:var(--gold-deep); border-color:var(--gold-deep); }
 .btn-enviar-push:disabled{ opacity:.6; cursor:default; }
+
+.push-dia-wrap{
+    display:flex;
+    align-items:center;
+}
+
+/* Banner de confirmación — pedido explícito: "sumar un banner enviar,
+   así si presiono por error lo revierte". Reemplaza al botón adentro
+   de #push-dia-wrap (mismo lugar, no un modal aparte) hasta que se
+   toque "Confirmar envío" o "Cancelar". */
+.banner-confirmar-push{
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
+    padding:8px 8px 8px 14px;
+    background:var(--gold-soft);
+    border:1px solid var(--gold);
+    border-radius:999px;
+}
+.banner-confirmar-push span{
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--text);
+}
+.banner-confirmar-push-botones{
+    display:flex;
+    gap:8px;
+}
+.btn-cancelar-push{
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:transparent;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+    transition:var(--transition);
+}
+.btn-cancelar-push:hover{ border-color:var(--text); color:var(--text); }
+.btn-confirmar-push{
+    padding:6px 14px;
+    border-radius:999px;
+    border:1px solid var(--gold);
+    background:var(--gold);
+    color:var(--black);
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+    transition:var(--transition);
+}
+.btn-confirmar-push:hover{ background:var(--gold-deep); border-color:var(--gold-deep); }
 
 /* Fila de acciones al pie de cada tarjeta — Editar/Eliminar (Admin),
    mismos íconos/estilo que ya usa el modal de Publicación
