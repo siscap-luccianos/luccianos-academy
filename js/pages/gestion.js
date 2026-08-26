@@ -810,36 +810,45 @@ function cuerpoGestionHtml() {
     // El calendario (grilla visual) es SOLO para Responsable de local/
     // turno — pedido explícito: "yo no ni supervisión necesita ver el
     // calendario, es para responsables". Admin/Supervisor (esVistaLectura)
-    // no tienen el toggle (frecuenciaToggleHtml no los renderiza) y
-    // revisan las tareas mensuales desde "Tareas" (desplegando cada una
-    // ven el día del mes elegido, mismo lugar de siempre) — nunca
-    // llegan a vistaFrecuencia==="mensual", pero el guard extra acá no
-    // hace daño si algún día cambia cómo se llega a esVistaLectura.
+    // en cambio SÍ necesitan poder llegar a un día del mes puntual para
+    // exportarlo — pedido explícito: "cómo exporto una tarea mensual?"
+    // (antes no había forma). Solución acordada: pills chicas, mismo
+    // lenguaje que las tabs de día de siempre, SOLO para los días del
+    // mes que de verdad tengan alguna tarea mensual cargada — sin la
+    // grilla completa (esa sigue siendo solo de Responsable).
     const esVistaMensual = !esVistaLectura && vistaFrecuencia === "mensual";
 
-    const panelesDiaHtml = esVistaMensual
-        ? diasDelMesActual().map((d) => {
-            const tareasDelDia = tareasMensuales.filter((t) => t.dias.includes(d));
-            return `
-                <div class="section" data-panel-dia="${d}" style="display:none">
-                    <h3>Día ${d}</h3>
-                    <div class="lista-tareas-gestion">
-                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
-                    </div>
-                </div>
-            `;
-        }).join("")
-        : DIAS.map((d) => {
-            const tareasDelDia = tareasSemanales.filter((t) => t.dias.includes(d));
-            return `
-                <div class="section" data-panel-dia="${d}" style="display:none">
-                    <h3>${d}</h3>
-                    <div class="lista-tareas-gestion">
-                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
-                    </div>
-                </div>
-            `;
-        }).join("");
+    const panelHtml = (d, titulo, tareasDelDia) => `
+        <div class="section" data-panel-dia="${d}" style="display:none">
+            <h3>${titulo}</h3>
+            <div class="lista-tareas-gestion">
+                ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
+            </div>
+        </div>
+    `;
+
+    const panelesSemanalesHtml = DIAS.map((d) => panelHtml(d, d, tareasSemanales.filter((t) => t.dias.includes(d)))).join("");
+
+    // Solo los días del mes que YA tienen algo asignado — a diferencia
+    // del calendario de Responsable (que muestra el mes entero, vacíos
+    // incluidos, para poder asignar), acá es puramente para revisar/
+    // exportar lo que cada local ya cargó.
+    const diasMesConContenido = [...new Set(tareasMensuales.flatMap((t) => t.dias))].sort((a, b) => Number(a) - Number(b));
+    const panelesMensualesConContenidoHtml = diasMesConContenido.map((d) => panelHtml(d, `Día ${d}`, tareasMensuales.filter((t) => t.dias.includes(d)))).join("");
+
+    let panelesDiaHtml;
+    let tabsDiaHtml;
+    if (esVistaLectura) {
+        panelesDiaHtml = panelesSemanalesHtml + panelesMensualesConContenidoHtml;
+        tabsDiaHtml = DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")
+            + diasMesConContenido.map((d) => `<button class="tab-gestion" data-vista-dia="${d}" title="Día ${d} del mes">${d}</button>`).join("");
+    } else if (esVistaMensual) {
+        panelesDiaHtml = diasDelMesActual().map((d) => panelHtml(d, `Día ${d}`, tareasMensuales.filter((t) => t.dias.includes(d)))).join("");
+        tabsDiaHtml = "";
+    } else {
+        panelesDiaHtml = panelesSemanalesHtml;
+        tabsDiaHtml = DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("");
+    }
 
     return `
         ${acciones}
@@ -847,7 +856,7 @@ function cuerpoGestionHtml() {
 
         <div class="tabs-gestion" id="tabs-dias-gestion">
             <button class="tab-gestion activa" data-vista-dia="tareas">Tareas</button>
-            ${esVistaMensual ? "" : DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")}
+            ${tabsDiaHtml}
         </div>
 
         ${esVistaMensual ? calendarioMensualHtml(tareasMensuales) : ""}
