@@ -416,17 +416,29 @@ function tareaHtml(t, idUnico, dia) {
     // de check.hecho (completa), no de que la fila exista.
     const hechoTexto = check?.hecho ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
 
-    // Push POR TAREA, como sibling DESPUÉS de la tarjeta (no adentro)
-    // — pedido explícito con captura real: "el push está sobre la
-    // tarea... está por fuera... con una pill linda premium". Vuelve
-    // a ser por tarea (no un solo push por día) — pedido explícito
-    // aparte: "la idea es que esté el encabezado DE LA TAREA, que es
-    // lo importante" (ver bindPushWrap). Reusa la clase
+    // Push + Exportar, JUNTOS, como sibling DESPUÉS de la tarjeta (no
+    // adentro) — pedido explícito con captura real: "el push está
+    // sobre la tarea... está por fuera... con una pill linda premium,
+    // y exportar justamente al lado". El push volvió a ser por tarea
+    // (no un solo push por día, pedido aparte: "la idea es que esté
+    // el encabezado DE LA TAREA") — pero "al lado" seguía siendo un
+    // pedido real ("las pusiste una sobre la otra, quiero que estén
+    // una al lado de la otra"), así que Exportar se repite junto a
+    // CADA push en vez de vivir solo, una vez, lejos de cualquiera de
+    // ellos — exporta lo mismo (la guía del día completo) sin
+    // importar desde qué tarea se lo toque. Reusa la clase
     // "tarea-gestion-push" a propósito: exportarPdf.js ya la oculta
-    // del PDF (ESTILOS_IMPRESION), así un botón de acción no aparece
-    // nunca en el documento exportado sin tener que tocar ese archivo
-    // de nuevo. Vacío a propósito, bindPushWrap() lo pinta al enganchar.
-    const pushWrapHtml = esVistaLectura ? "" : `<div class="tarea-gestion-push" data-push-tarea-wrap${atrId}></div>`;
+    // del PDF (ESTILOS_IMPRESION), así estos botones de acción nunca
+    // aparecen en el documento exportado sin tocar ese archivo de
+    // nuevo. El wrap de push arranca vacío, bindPushWrap() lo pinta
+    // al enganchar.
+    const pushInteriorHtml = esVistaLectura ? "" : `<div class="push-tarea-wrap" data-push-tarea-wrap${atrId}></div>`;
+    const exportarInteriorHtml = sucursalActiva ? `
+        <button type="button" class="btn btn-secondary btn-exportar-tarea" data-exportar-gestion>${Icon("descargar", { size: 16 })} Exportar a PDF</button>
+    ` : "";
+    const pushWrapHtml = (pushInteriorHtml || exportarInteriorHtml) ? `
+        <div class="tarea-gestion-push"${atrId}>${pushInteriorHtml}${exportarInteriorHtml}</div>
+    ` : "";
 
     if (t.subitems) {
         const marcados = check?.subitems || new Set();
@@ -548,21 +560,23 @@ function recrearTareaEnPaneles(idTarea) {
     // :not(.fila-aplica-tarea) — la fila de "Tareas" es también
     // .tarea-gestion con el mismo data-tarea-id, pero esa se
     // actualiza aparte (actualizarFilaAplica), no se destruye acá.
-    // También borra el wrap de push (sibling suelto, no hijo de la
-    // tarjeta — sin esto quedaba huérfano en el DOM cada vez que una
-    // tarea cambiaba de día).
-    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]:not(.fila-aplica-tarea), [data-push-tarea-wrap][data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
+    // También borra la fila de Push+Exportar (.tarea-gestion-push,
+    // sibling suelto, no hijo de la tarjeta — sin esto quedaba
+    // huérfana en el DOM cada vez que una tarea cambiaba de día).
+    document.querySelectorAll(`.tarea-gestion[data-tarea-id="${idTarea}"]:not(.fila-aplica-tarea), .tarea-gestion-push[data-tarea-id="${idTarea}"]`).forEach((n) => n.remove());
     // dias vacío = "sin usar" — el .forEach de abajo simplemente no
     // agrega ninguna copia, no hace falta un guard aparte.
     tarea.dias.forEach((d) => {
         const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
         if (!lista) return;
-        // tareaHtml() devuelve DOS elementos hermanos (tarjeta + wrap
-        // de push) — buscarlos por atributo en vez de asumir
+        // tareaHtml() devuelve DOS elementos hermanos (tarjeta + fila
+        // de Push+Exportar) — buscarlos por atributo en vez de asumir
         // lastElementChild, que cambia según haya wrap o no
-        // (esVistaLectura no lo agrega).
+        // (esVistaLectura/sucursalActiva pueden vaciarlo).
         lista.insertAdjacentHTML("beforeend", tareaHtml(tarea, `${idTarea}-${d}`, d));
         const cardNueva = lista.querySelector(`.tarea-gestion[data-tarea-id="${idTarea}"][data-dia="${d}"]`);
+        // El botón de Exportar de acá no necesita bind propio (usa
+        // delegación, ver bindCuerpoGestion) — solo el wrap de push.
         const wrapNuevo = lista.querySelector(`[data-push-tarea-wrap][data-tarea-id="${idTarea}"][data-dia="${d}"]`);
         if (cardNueva) bindTarjetaNueva(cardNueva);
         if (wrapNuevo) bindPushWrap(wrapNuevo);
@@ -848,20 +862,15 @@ function cuerpoGestionHtml() {
     const pillsDiaHtml = DIAS_VISUAL.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d} ${fechaDelDiaSemana(d)}</button>`).join("")
         + diasMesConContenido.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}/${mesActual}</button>`).join("");
 
-    // "Exportar a PDF" — acción de DÍA (arma un único documento con
-    // todo lo que hay en el panel activo), al pie del contenido, no
-    // arriba pegado a las pills — pedido explícito: "está abajo en el
-    // mock, no arriba". "Enviar push" YA NO vive acá: es por tarea
-    // (ver tareaHtml/pushWrapHtml) — pedido explícito, con un ejemplo
-    // real: "la idea es que esté el encabezado DE LA TAREA, que es lo
-    // importante" — un push que resumiera TODO el día perdía justo
-    // ese dato. Arranca oculto, bindCuerpoGestion() lo muestra al
-    // tocar una pill de día.
-    const accionesDiaHtml = sucursalActiva ? `
-        <button type="button" class="btn btn-secondary" id="btn-exportar-gestion" style="display:none">
-            ${Icon("descargar", { size: 16 })} Exportar a PDF
-        </button>
-    ` : "";
+    // "Exportar a PDF" YA NO vive acá suelto — se mudó adentro de
+    // cada fila de tarea (junto al push de esa tarea, ver tareaHtml)
+    // porque un solo botón lejos de todas las tareas no podía estar
+    // "al lado" de ninguna — pedido explícito: "las pusiste una sobre
+    // la otra, quiero que estén una al lado de la otra". Se repite
+    // por tarea (exporta lo mismo, la guía del día completo, sin
+    // importar desde cuál se lo toque) y ya no necesita mostrar/
+    // ocultar aparte: nace y muere con el panel del día, que ya se
+    // muestra/oculta solo.
 
     return `
         ${acciones}
@@ -880,10 +889,8 @@ function cuerpoGestionHtml() {
 
         <!-- "Tareas asignadas": pills de día/fecha — tocás una, ves
              las tareas de ESE día, las marcás hechas, mandás push por
-             tarea (ver tareaHtml). "Exportar a PDF" va AL PIE,
-             después del contenido exportable
-             (#contenido-gestion-imprimible) — "Asignar tareas" no
-             tiene nada de esto. -->
+             tarea, junto al push de esa misma tarea (ver tareaHtml)
+             — "Asignar tareas" no tiene nada de esto. -->
         <div id="seccion-tareas-asignadas"${vistaSeccion === "ejecutar" ? "" : ' style="display:none"'}>
             <div class="tabs-gestion" id="tabs-dias-gestion">
                 ${pillsDiaHtml}
@@ -892,7 +899,6 @@ function cuerpoGestionHtml() {
                 ${membreteHtml("Guía de Gestión", sucursalActiva)}
                 ${panelesSemanalesHtml}${panelesMensualesHtml}
             </div>
-            ${accionesDiaHtml}
         </div>
     `;
 }
@@ -1222,6 +1228,7 @@ function pushBannerHtml() {
  *  lo tapaba. */
 function bindPushWrap(wrap) {
     const tareaId = wrap.dataset.tareaId;
+    const dia = wrap.dataset.dia;
 
     function pintarBoton() {
         wrap.innerHTML = pushBotonHtml();
@@ -1237,11 +1244,12 @@ function bindPushWrap(wrap) {
     async function enviar() {
         const boton = wrap.querySelector("[data-btn-confirmar-push]");
         const tarea = registroTareas.get(tareaId);
-        // La tarjeta vive SIEMPRE justo antes del wrap en el DOM (ver
-        // pushWrapHtml, se arman juntos en el mismo return de
-        // tareaHtml) — buscarla por hermano evita otro querySelector
-        // por atributos repetidos entre paneles.
-        const tarjeta = wrap.previousElementSibling;
+        // El wrap ya NO es sibling directo de la tarjeta (ahora los
+        // dos viven adentro de .tarea-gestion-push, junto a
+        // Exportar, para quedar "al lado" uno del otro) — se busca
+        // por tarea+día, que juntos son únicos en la página (la fila
+        // de "Tareas" tiene tarea-id pero nunca data-dia).
+        const tarjeta = document.querySelector(`.tarea-gestion[data-tarea-id="${tareaId}"][data-dia="${dia}"]`);
         if (!tarea || !tarjeta) { pintarBoton(); return; }
 
         const checks = Array.from(tarjeta.querySelectorAll(".subitem-gestion-check, .tarea-gestion-check"));
@@ -1311,18 +1319,17 @@ function bindCuerpoGestion() {
             document.querySelectorAll("[data-panel-dia]").forEach((panel) => {
                 panel.style.display = panel.dataset.panelDia === diaActivo ? "" : "none";
             });
-            // Exportar solo tiene sentido con un día real activo.
-            const btnExportar = document.getElementById("btn-exportar-gestion");
-            if (btnExportar) btnExportar.style.display = "";
+            // "Exportar a PDF" ya no necesita mostrarse/ocultarse
+            // aparte: vive adentro de cada tarea (ver tareaHtml), que
+            // ya nace/muere con el panel del día que se está
+            // mostrando/ocultando acá arriba.
         });
     });
 
     // "Asignar tareas" / "Tareas asignadas" — pedido explícito, con
     // croquis: dos secciones separadas en vez de todo amontonado en
     // una. Solo muestra/oculta (no hace falta re-renderizar ni traer
-    // nada del backend, la data ya está toda en memoria). Al volver a
-    // "Asignar tareas" se oculta Exportar — no hay ningún día activo
-    // relevante ahí.
+    // nada del backend, la data ya está toda en memoria).
     document.querySelectorAll("[data-vista-seccion]").forEach((btn) => {
         btn.addEventListener("click", () => {
             if (btn.dataset.vistaSeccion === vistaSeccion) return;
@@ -1331,8 +1338,6 @@ function bindCuerpoGestion() {
             btn.classList.add("activa");
             document.getElementById("seccion-asignar-tareas").style.display = vistaSeccion === "asignar" ? "" : "none";
             document.getElementById("seccion-tareas-asignadas").style.display = vistaSeccion === "ejecutar" ? "" : "none";
-            const btnExportar = document.getElementById("btn-exportar-gestion");
-            if (btnExportar && vistaSeccion === "asignar") btnExportar.style.display = "none";
         });
     });
 
@@ -1356,7 +1361,14 @@ function bindCuerpoGestion() {
     // así que sin este paso el PDF salía con TODO destildado por más
     // que se hubiera marcado todo. Se sincroniza el atributo con el
     // estado real justo antes de exportar.
-    document.getElementById("btn-exportar-gestion")?.addEventListener("click", () => {
+    // Delegado en #contenido-gestion-imprimible (contenedor estable)
+    // en vez de un id único — ahora "Exportar a PDF" se repite una
+    // vez por tarea (ver tareaHtml), así que cualquiera de esas
+    // copias tiene que disparar lo mismo sin necesitar su propio
+    // listener ni volver a engancharse cada vez que una tarea cambia
+    // de día (recrearTareaEnPaneles).
+    document.getElementById("contenido-gestion-imprimible")?.addEventListener("click", (e) => {
+        if (!e.target.closest("[data-exportar-gestion]")) return;
         document.querySelectorAll("#contenido-gestion-imprimible input[type=checkbox]").forEach((chk) => {
             if (chk.checked) chk.setAttribute("checked", "checked");
             else chk.removeAttribute("checked");
@@ -1395,9 +1407,9 @@ function bindCuerpoGestion() {
         // final, no como viene de la app". Un intento anterior de
         // forzar todos los días a la vez (para que "Tareas" no diera
         // un PDF vacío) se revirtió el mismo día por esto — en vez de
-        // eso, el botón directamente no se muestra si no hay un día
-        // activo (ver botonExportar en cuerpoGestionHtml y el
-        // switcher de data-vista-dia en bindCuerpoGestion).
+        // eso, el botón vive adentro de cada tarea (ver tareaHtml),
+        // que ya solo existe dentro del panel del día que esté
+        // activo en ese momento.
 
         // soloDescarga:true (2026-08-26, revertido el mismo día): la idea
         // era que acá el reporte nunca es grande y el botón "Imprimir"
