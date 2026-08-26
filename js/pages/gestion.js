@@ -70,6 +70,28 @@ import { aplicaASucursal, normalizar } from "../services/alcance.js";
 =============================*/
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
+/** Iniciales para el encabezado de la grilla del calendario mensual —
+ *  mismo orden que DIAS (arranca Domingo). */
+const DIAS_INICIAL = ["D", "L", "M", "M", "J", "V", "S"];
+
+/** "Semanal" (pills Do-Sá) o "Mensual" (grilla tipo calendario) —
+ *  pedido explícito: tareas como "vencimiento de matafuego el 20" no
+ *  encajan en el patrón de día de semana. Estado de módulo (no se
+ *  persiste, no hace falta) — Gestion()/bindGestion() lo leen para
+ *  decidir qué mostrar en el cuerpo de la página. */
+let vistaFrecuencia = "semanal";
+
+/** Los números de día (como STRING, para comparar contra t.dias tal
+ *  cual vienen de la Sheet) del mes ACTUAL — pedido explícito: sin
+ *  navegación entre meses, es un recordatorio del "ahora", no un
+ *  planificador a futuro. Sale de la fecha real, así ya sabe si el
+ *  mes tiene 28, 30 o 31 días sin ningún caso especial. */
+function diasDelMesActual() {
+    const hoy = new Date();
+    const ultimoDia = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
+    return Array.from({ length: ultimoDia }, (_, i) => String(i + 1));
+}
+
 // FASE 1: ya no es un array fijo — Gestion() lo puebla en cada render
 // con getTareas() (data/gestionTareas.js → hoja "GestionTareas" real).
 // Queda `let` porque confirmarTarea/eliminarTarea empujan/sacan de
@@ -148,19 +170,28 @@ function actualizarAvisoDiaVacio(lista) {
 /** Pedido explícito: "que el selector de días me permita poner más de
  *  un día — los depósitos se hacen lunes y viernes". Pills, no un
  *  <select multiple> (mal en celular) — cada una prende/apaga un día,
- *  siempre visibles, sin abrir ningún modal. */
+ *  siempre visibles, sin abrir ningún modal.
+ *
+ *  Tareas "mensuales" (t.frecuencia) usan el MISMO mecanismo (mismas
+ *  clases, mismo data-toggle-dia, mismo bindDiasControl) pero con
+ *  números de día del mes (1..último día del mes actual) en vez de
+ *  nombres de día — es la única diferencia real entre las dos, así
+ *  que bindDiasControl no necesita saber que existen dos tipos. */
 function diasControlHtml(t) {
+    const esMensual = t.frecuencia === "mensual";
+    const opciones = esMensual ? diasDelMesActual() : DIAS;
     // Solo lectura: pills como <span>, sin data-toggle-dia — no hay
     // nada que enganchar, ni forma de tocarlas por accidente.
     return `
         <div class="tarea-gestion-dia-control">
-            <span class="tarea-gestion-dia-label">Días</span>
-            <div class="dias-pills-tarea">
-                ${DIAS.map((d) => {
+            <span class="tarea-gestion-dia-label">${esMensual ? "Día del mes" : "Días"}</span>
+            <div class="dias-pills-tarea${esMensual ? " dias-pills-tarea-mes" : ""}">
+                ${opciones.map((d) => {
                     const activa = t.dias.includes(d);
+                    const etiqueta = esMensual ? d : d.slice(0, 2);
                     return esVistaLectura
-                        ? `<span class="pill-dia-tarea${activa ? " activa" : ""}" title="${d}">${d.slice(0, 2)}</span>`
-                        : `<button type="button" class="pill-dia-tarea${activa ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${d.slice(0, 2)}</button>`;
+                        ? `<span class="pill-dia-tarea${activa ? " activa" : ""}" title="${d}">${etiqueta}</span>`
+                        : `<button type="button" class="pill-dia-tarea${activa ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${etiqueta}</button>`;
                 }).join("")}
             </div>
         </div>
@@ -238,6 +269,14 @@ function alcanceBadgeHtml(t) {
     return "";
 }
 
+/** "Mensual" — solo se marca la excepción (mensual), "semanal" es el
+ *  caso por defecto y no hace falta remarcarlo, mismo criterio que
+ *  alcanceBadgeHtml. */
+function frecuenciaBadgeHtml(t) {
+    if (t.frecuencia !== "mensual") return "";
+    return `<span class="badge-alcance-tarea badge-frecuencia-tarea" title="Tarea mensual — se asigna por día del mes, no por día de semana">${Icon("calendario", { size: 12 })} Mensual</span>`;
+}
+
 /** Fila de la pestaña "Tareas" — pedido explícito: tocarla DESPLIEGA
  *  los días de la semana ahí mismo (mismo patrón desplegable que
  *  "Pedido a proveedores"), se eligen con las pills, y la tarjeta
@@ -261,6 +300,7 @@ function aplicaTareaHtml(t) {
                     <strong>${t.titulo}</strong>
                     <span>${t.detalle}</span>
                 </span>
+                ${frecuenciaBadgeHtml(t)}
                 ${alcanceBadgeHtml(t)}
                 ${sinLocalElegido ? "" : `<span class="badge-en-uso${enUso ? " activa" : ""}">${enUso ? "En uso" : "Sin usar"}</span>`}
                 <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
@@ -364,6 +404,21 @@ function contenidoModalTarea({ tarea } = {}) {
                 ${ICONOS_TAREA.map((i) => `<option value="${i.valor}"${i.valor === tarea?.icono ? " selected" : ""}>${i.label}</option>`).join("")}
             </select>
         </label>
+        <label style="margin-top:16px;display:block;margin-bottom:8px">Frecuencia</label>
+        <div class="radio-cards" style="margin-bottom:16px">
+            <label class="radio-card">
+                <input type="radio" name="tarea-frecuencia" value="semanal" id="input-frecuencia-semanal"${tarea?.frecuencia === "mensual" ? "" : " checked"}>
+                <span class="radio-card-radio"></span>
+                <span class="radio-card-titulo">Semanal</span>
+                <span class="radio-card-desc">Se asigna por día de la semana</span>
+            </label>
+            <label class="radio-card">
+                <input type="radio" name="tarea-frecuencia" value="mensual" id="input-frecuencia-mensual"${tarea?.frecuencia === "mensual" ? " checked" : ""}>
+                <span class="radio-card-radio"></span>
+                <span class="radio-card-titulo">Mensual</span>
+                <span class="radio-card-desc">Se asigna por día del mes, como recordatorio</span>
+            </label>
+        </div>
         <label class="campo-subtareas-nueva">Sub-tareas (opcional)
             <div id="lista-subtareas-nueva">${(tarea?.subitems || []).map(subtareaNuevaFilaHtml).join("")}</div>
             <button type="button" class="btn-agregar-subtarea-nueva" id="btn-agregar-subtarea-nueva">+ Agregar sub-tarea</button>
@@ -412,9 +467,13 @@ function recrearTareaEnPaneles(idTarea) {
     });
     // Cualquier día pudo haber quedado sin nada (se le sacó la última
     // tarea) o dejar de estar vacío (se le sumó la primera) — revisar
-    // los 7, no solo los de esta tarea, es la forma simple de no
-    // dejar ni un aviso viejo colgado ni uno faltante.
-    DIAS.forEach((d) => {
+    // TODOS los paneles posibles (7 días de semana + hasta 31 del mes),
+    // no solo los de esta tarea, es la forma simple de no dejar ni un
+    // aviso viejo colgado ni uno faltante. actualizarAvisoDiaVacio ya
+    // no hace nada si el panel no existe en el DOM (vista semanal
+    // activa cuando la tarea es mensual, o viceversa), así que barrer
+    // los dos juegos siempre es seguro.
+    [...DIAS, ...diasDelMesActual()].forEach((d) => {
         actualizarAvisoDiaVacio(document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`));
     });
     // Si el cambio de día se disparó DESDE la propia fila de "Tareas"
@@ -455,7 +514,31 @@ async function confirmarTarea(idEditado = null) {
     // local) — se preserva lo que ya tuviera en vez de pisarlo con "",
     // por si se cargó a mano en la Sheet.
     const noAplicaA = registroTareas.get(idEditado)?.noAplicaA || "";
-    const datos = { icono, titulo, detalle, aplicaA, noAplicaA, ...(subitems.length ? { subitems } : {}) };
+    const frecuencia = document.getElementById("input-frecuencia-mensual")?.checked ? "mensual" : "semanal";
+    const tareaPrevia = idEditado ? registroTareas.get(idEditado) : null;
+    // Cambiar semanal↔mensual vuelve sin sentido los días que cada
+    // local ya tenía elegidos (nombres de día vs. números de día del
+    // mes son cosas distintas) — pedir confirmación explícita en vez
+    // de guardarlos igual (quedarían pills tildadas con valores que ya
+    // no corresponden a nada real) o borrarlos en silencio.
+    if (tareaPrevia && tareaPrevia.frecuencia !== frecuencia && tareaPrevia.dias.length > 0) {
+        if (!confirm(`Cambiar la frecuencia de "${tareaPrevia.titulo}" borra los días que cada local ya le había elegido (no tienen sentido en el otro patrón). ¿Seguro?`)) {
+            return false;
+        }
+    }
+    const datos = { icono, titulo, detalle, aplicaA, noAplicaA, frecuencia, ...(subitems.length ? { subitems } : {}) };
+
+    // Cambió de frecuencia (ya confirmado arriba) — los días de ESTE
+    // local en pantalla quedan sin sentido, se limpian de verdad
+    // (memoria + backend). Sucursales que no están activas en este
+    // momento quedan con la fila vieja en GestionTareasSucursal —
+    // inerte en la práctica (ningún día del nuevo patrón matchea un
+    // nombre de día viejo ni viceversa, así que ese local ve la tarea
+    // simplemente "sin usar" hasta que la vuelva a tocar).
+    const cambioFrecuencia = tareaPrevia && tareaPrevia.frecuencia !== frecuencia;
+    if (cambioFrecuencia && sucursalActiva) {
+        guardarDiasSucursal(idEditado, [], sucursalActiva).catch(() => {});
+    }
 
     if (idEditado) {
         const r = await actualizarTareaBackend(idEditado, datos);
@@ -463,7 +546,7 @@ async function confirmarTarea(idEditado = null) {
             alert("No se pudo guardar — probá de nuevo.");
             return false;
         }
-        const diasPrevios = registroTareas.get(idEditado)?.dias || [];
+        const diasPrevios = cambioFrecuencia ? [] : (registroTareas.get(idEditado)?.dias || []);
         registroTareas.set(idEditado, { id: idEditado, ...datos, dias: diasPrevios });
         TAREAS = TAREAS.map((t) => (t.id === idEditado ? registroTareas.get(idEditado) : t));
         recrearTareaEnPaneles(idEditado);
@@ -534,6 +617,60 @@ function selectorLocalHtml() {
             <label for="selector-local-gestion">${Icon("locales", { size: 15 })} Local</label>
             ${AutocompleteSucursal("selector-local-gestion", sucursalActiva)}
             <button type="button" class="btn-limpiar-local" id="btn-limpiar-local" title="Borrar selección" aria-label="Borrar selección de local"${sucursalActiva ? "" : ' style="display:none"'}>${Icon("cerrar", { size: 14 })}</button>
+        </div>
+    `;
+}
+
+/** Interruptor Semanal/Mensual — pedido explícito: un toggle simple,
+ *  no una tercera pestaña más entre las de día (esas son dos formas
+ *  distintas de ver/ejecutar, no dos secciones más de contenido). */
+function frecuenciaToggleHtml() {
+    return `
+        <div class="toggle-frecuencia-gestion">
+            <button type="button" class="toggle-frecuencia-btn${vistaFrecuencia === "semanal" ? " activa" : ""}" data-vista-frecuencia="semanal">Semanal</button>
+            <button type="button" class="toggle-frecuencia-btn${vistaFrecuencia === "mensual" ? " activa" : ""}" data-vista-frecuencia="mensual">Mensual</button>
+        </div>
+    `;
+}
+
+/** Grilla tipo calendario del MES ACTUAL — pedido explícito, con
+ *  captura del Calendario nativo de iOS como referencia. Sin
+ *  navegación a otros meses (es un recordatorio del "ahora", no un
+ *  planificador a futuro — ver la nota de diasDelMesActual). Cada
+ *  celda es un [data-vista-dia] más, mismo mecanismo que las pills
+ *  semanales (ver bindCuerpoGestion) — un punto marca los días que
+ *  tienen al menos una tarea mensual asignada en este local. */
+function calendarioMensualHtml(tareasMensuales) {
+    const hoy = new Date();
+    const anio = hoy.getFullYear();
+    const mes = hoy.getMonth();
+    const diaHoy = hoy.getDate();
+    // getDay(): 0=domingo — coincide con que la semana acá arranca
+    // domingo (mismo criterio que DIAS), así el offset no necesita
+    // ningún ajuste.
+    const offsetPrimerDia = new Date(anio, mes, 1).getDay();
+    const ultimoDia = new Date(anio, mes + 1, 0).getDate();
+    const nombreMes = hoy.toLocaleDateString("es-AR", { month: "long" });
+
+    const tieneTarea = (n) => tareasMensuales.some((t) => t.dias.includes(String(n)));
+
+    const celdasVacias = Array.from({ length: offsetPrimerDia }, () => `<span class="dia-mes-celda dia-mes-vacio"></span>`).join("");
+    const celdasDias = Array.from({ length: ultimoDia }, (_, i) => i + 1).map((n) => `
+        <button type="button" class="dia-mes-celda${n === diaHoy ? " dia-mes-hoy" : ""}" data-vista-dia="${n}">
+            <span>${n}</span>
+            ${tieneTarea(n) ? `<span class="dia-mes-punto"></span>` : ""}
+        </button>
+    `).join("");
+
+    return `
+        <div class="calendario-mensual" id="calendario-mensual">
+            <p class="calendario-mensual-titulo">${nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1)} de ${anio}</p>
+            <div class="calendario-mensual-encabezado">
+                ${DIAS_INICIAL.map((d) => `<span>${d}</span>`).join("")}
+            </div>
+            <div class="calendario-mensual-grilla">
+                ${celdasVacias}${celdasDias}
+            </div>
         </div>
     `;
 }
@@ -617,13 +754,49 @@ function cuerpoGestionHtml() {
         `;
     }
 
+    // Semanal/Mensual — dos formas de EJECUTAR (pills de día vs.
+    // calendario), no dos secciones más de contenido. "Tareas" es
+    // ajena a esto: el catálogo mezcla las dos frecuencias (con el
+    // badge "Mensual" para distinguirlas), acá solo cambia cómo se
+    // navegan los días reales.
+    const esVistaMensual = vistaFrecuencia === "mensual";
+    const tareasSemanales = tareasParaLocal.filter((t) => t.frecuencia !== "mensual");
+    const tareasMensuales = tareasParaLocal.filter((t) => t.frecuencia === "mensual");
+
+    const panelesDiaHtml = esVistaMensual
+        ? diasDelMesActual().map((d) => {
+            const tareasDelDia = tareasMensuales.filter((t) => t.dias.includes(d));
+            return `
+                <div class="section" data-panel-dia="${d}" style="display:none">
+                    <h3>Día ${d}</h3>
+                    <div class="lista-tareas-gestion">
+                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
+                    </div>
+                </div>
+            `;
+        }).join("")
+        : DIAS.map((d) => {
+            const tareasDelDia = tareasSemanales.filter((t) => t.dias.includes(d));
+            return `
+                <div class="section" data-panel-dia="${d}" style="display:none">
+                    <h3>${d}</h3>
+                    <div class="lista-tareas-gestion">
+                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
+                    </div>
+                </div>
+            `;
+        }).join("");
+
     return `
         ${acciones}
+        ${frecuenciaToggleHtml()}
 
         <div class="tabs-gestion" id="tabs-dias-gestion">
             <button class="tab-gestion activa" data-vista-dia="tareas">Tareas</button>
-            ${DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")}
+            ${esVistaMensual ? "" : DIAS.map((d) => `<button class="tab-gestion" data-vista-dia="${d}">${d}</button>`).join("")}
         </div>
+
+        ${esVistaMensual ? calendarioMensualHtml(tareasMensuales) : ""}
 
         <!-- "Tareas": catálogo — tocás una, se despliegan sus
              días, elegís. Con al menos un día queda verde ("En
@@ -636,17 +809,7 @@ function cuerpoGestionHtml() {
 
         <div id="contenido-gestion-imprimible">
             ${membreteHtml("Guía de Gestión", sucursalActiva)}
-            ${DIAS.map((d) => {
-                const tareasDelDia = tareasParaLocal.filter((t) => t.dias.includes(d));
-                return `
-                <div class="section" data-panel-dia="${d}" style="display:none">
-                    <h3>${d}</h3>
-                    <div class="lista-tareas-gestion">
-                        ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
-                    </div>
-                </div>
-            `;
-            }).join("")}
+            ${panelesDiaHtml}
         </div>
     `;
 }
@@ -940,18 +1103,36 @@ function bindTarjetaNueva(nodo) {
  *  reconstruye — al cargar la página Y cada vez que Admin/Supervisor
  *  cambia de local en el selector (mismo contenido, nodos nuevos). */
 function bindCuerpoGestion() {
-    // Pills de días (Domingo primero) — único switcher de la pantalla
-    // desde que se sacaron las pestañas de área ("Formación"/"¿Qué
-    // hago si...?", 2026-08-25).
-    const tabsDias = document.getElementById("tabs-dias-gestion");
-    tabsDias?.querySelectorAll("[data-vista-dia]").forEach((btn) => {
+    // Pills de días (Domingo primero) Y celdas del calendario mensual
+    // comparten el mismo mecanismo — data-vista-dia activa, muestra el
+    // [data-panel-dia] que matchea, oculta el resto. Sin escopar a un
+    // solo contenedor (antes solo #tabs-dias-gestion): la grilla
+    // mensual vive en OTRO contenedor aparte (#calendario-mensual, con
+    // pinta de calendario, no de fila de pills), pero es el mismo
+    // patrón exacto — un solo listener para los dos.
+    document.querySelectorAll("#cuerpo-gestion [data-vista-dia]").forEach((btn) => {
         btn.addEventListener("click", () => {
-            tabsDias.querySelectorAll("[data-vista-dia]").forEach((b) => b.classList.remove("activa"));
+            document.querySelectorAll("#cuerpo-gestion [data-vista-dia]").forEach((b) => b.classList.remove("activa"));
             btn.classList.add("activa");
             const dia = btn.dataset.vistaDia;
             document.querySelectorAll("[data-panel-dia]").forEach((panel) => {
                 panel.style.display = panel.dataset.panelDia === dia ? "" : "none";
             });
+        });
+    });
+
+    // Semanal/Mensual — pedido explícito: tareas tipo "vencimiento de
+    // matafuego el 20" no encajan en el patrón de día de semana. Re-
+    // renderiza todo #cuerpo-gestion (mismo patrón que elegirLocalGestion),
+    // no hace falta traer nada nuevo del backend, es puro cambio de vista.
+    document.querySelectorAll("[data-vista-frecuencia]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            if (btn.dataset.vistaFrecuencia === vistaFrecuencia) return;
+            vistaFrecuencia = btn.dataset.vistaFrecuencia;
+            const cuerpo = document.getElementById("cuerpo-gestion");
+            if (!cuerpo) return;
+            cuerpo.innerHTML = cuerpoGestionHtml();
+            bindCuerpoGestion();
         });
     });
 

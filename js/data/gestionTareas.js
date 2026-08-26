@@ -49,11 +49,22 @@ function normalizarTarea(f) {
         // Vacío = aplica a TODOS. La exclusión (noAplicaA) gana.
         aplicaA: String(f.aplicaA || "").trim(),
         noAplicaA: String(f.noAplicaA || "").trim(),
+        // "semanal" (default) o "mensual" — pedido explícito: tareas
+        // como "controlar vencimiento de matafuego el 20" no encajan
+        // en el patrón de día-de-semana. Decide si t.dias (per-
+        // sucursal, ver gestionTareasSucursal.js) se interpreta como
+        // nombres de día ("Lunes") o números de día del mes ("20") —
+        // MISMA columna "dias" en las dos hojas involucradas, ningún
+        // esquema nuevo ahí, la diferencia es solo de interpretación
+        // en gestion.js según este campo. Celdas viejas sin esta
+        // columna (o con cualquier otro valor) caen a "semanal", el
+        // comportamiento de siempre.
+        frecuencia: f.frecuencia === "mensual" ? "mensual" : "semanal",
     };
 }
 
 /** subitems de array a string separado por coma, para la Sheet. */
-function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA }) {
+function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA, frecuencia }) {
     return {
         icono,
         titulo,
@@ -61,6 +72,7 @@ function aFilaSheet({ icono, titulo, detalle, subitems, aplicaA, noAplicaA }) {
         subitems: (subitems || []).join(","),
         aplicaA: aplicaA || "",
         noAplicaA: noAplicaA || "",
+        frecuencia: frecuencia === "mensual" ? "mensual" : "semanal",
     };
 }
 
