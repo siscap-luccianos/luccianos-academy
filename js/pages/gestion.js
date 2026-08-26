@@ -632,8 +632,12 @@ function selectorLocalHtml() {
 
 /** Interruptor Semanal/Mensual — pedido explícito: un toggle simple,
  *  no una tercera pestaña más entre las de día (esas son dos formas
- *  distintas de ver/ejecutar, no dos secciones más de contenido). */
+ *  distintas de ver/ejecutar, no dos secciones más de contenido).
+ *  Solo para Responsable de local/turno — "el calendario es para
+ *  responsables", Admin/Supervisor no lo necesitan (ven todo desde
+ *  "Tareas", agrupado). */
 function frecuenciaToggleHtml() {
+    if (esVistaLectura) return "";
     return `
         <div class="toggle-frecuencia-gestion">
             <button type="button" class="toggle-frecuencia-btn${vistaFrecuencia === "semanal" ? " activa" : ""}" data-vista-frecuencia="semanal">Semanal</button>
@@ -726,7 +730,7 @@ function cuerpoGestionHtml() {
     // tareas del catálogo, eso es global. aplicaTareaHtml() ya sabe
     // ocultar días/push cuando no hay local (sinLocalElegido).
     //
-    // Con local elegido, agrupada en 3 secciones — pedido explícito:
+    // Con local elegido, agrupada en secciones — pedido explícito:
     // "que cada uno se agrupe a su sector, no todo en lo mismo". Las
     // mensuales van SIEMPRE en su propia sección (nunca mezcladas con
     // las semanales): una tarea mensual sin ningún día elegido no
@@ -736,16 +740,28 @@ function cuerpoGestionHtml() {
     // siempre, de hecho, "las mensuales en uso". Sin local elegido no
     // hay frecuencia real que agrupar (t.frecuencia no significa nada
     // sin saber de qué local), sigue plana como siempre.
+    //
+    // Responsable de local/turno (tiene el toggle Semanal/Mensual de
+    // arriba, ver frecuenciaToggleHtml) ve SOLO la sección que
+    // corresponde a la vista elegida — pedido explícito: "si elijo
+    // semanal se vea solo lo que aplica semanal... actualmente está
+    // todo amontonado". "Sin usar" queda SIEMPRE visible en las dos
+    // vistas (en cualquiera de las dos hace falta poder encontrar una
+    // tarea sin asignar para agarrarla). Admin/Supervisor (esVistaLectura)
+    // NO tienen ese toggle — "el calendario es para responsables", ven
+    // el catálogo entero de un vistazo, sin filtrar.
     const listaTareasHtml = hayLocal
         ? (() => {
             const activas = tareasSemanales.filter((t) => t.dias.length > 0);
             const noActivas = tareasSemanales.filter((t) => t.dias.length === 0);
+            const verMensuales = esVistaLectura || vistaFrecuencia === "mensual";
+            const verSemanales = esVistaLectura || vistaFrecuencia === "semanal";
             return `
-                ${tareasMensuales.length ? `
+                ${verMensuales && tareasMensuales.length ? `
                     <p class="titulo-grupo-tareas">Mensuales (${tareasMensuales.length})</p>
                     <div class="lista-tareas-gestion">${tareasMensuales.map(aplicaTareaHtml).join("")}</div>
                 ` : ""}
-                ${activas.length ? `
+                ${verSemanales && activas.length ? `
                     <p class="titulo-grupo-tareas">Semanales en uso (${activas.length})</p>
                     <div class="lista-tareas-gestion">${activas.map(aplicaTareaHtml).join("")}</div>
                 ` : ""}
@@ -784,7 +800,16 @@ function cuerpoGestionHtml() {
     // ajena a esto (agrupa por sección arriba, ver listaTareasHtml):
     // acá solo cambia cómo se navegan los días reales. tareasSemanales/
     // tareasMensuales ya están calculadas más arriba.
-    const esVistaMensual = vistaFrecuencia === "mensual";
+    //
+    // El calendario (grilla visual) es SOLO para Responsable de local/
+    // turno — pedido explícito: "yo no ni supervisión necesita ver el
+    // calendario, es para responsables". Admin/Supervisor (esVistaLectura)
+    // no tienen el toggle (frecuenciaToggleHtml no los renderiza) y
+    // revisan las tareas mensuales desde "Tareas" (desplegando cada una
+    // ven el día del mes elegido, mismo lugar de siempre) — nunca
+    // llegan a vistaFrecuencia==="mensual", pero el guard extra acá no
+    // hace daño si algún día cambia cómo se llega a esVistaLectura.
+    const esVistaMensual = !esVistaLectura && vistaFrecuencia === "mensual";
 
     const panelesDiaHtml = esVistaMensual
         ? diasDelMesActual().map((d) => {
