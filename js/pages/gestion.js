@@ -901,11 +901,11 @@ export async function Gestion() {
     [sucursales] = await Promise.all([getSucursales(), cargarDatos(sucursalActiva)]);
 
     return `
-        ${Header("Gestión semanal", "Organizá las tareas de tu local, día por día")}
+        ${Header("Gestión de tareas", "Organizá las tareas de tu local, por día o por mes")}
 
         <div class="aviso-maqueta">
             ${Icon("idea", { size: 16 })}
-            <p>Elegí en qué días aplica cada tarea desde "Tareas", tildala como hecha en la vista de cada día, y avisale al equipo con "Enviar push" cuando haga falta.</p>
+            <p>Elegí en qué días aplica cada tarea desde "Tareas" — Semanal o Mensual, vos decidís — y tildala como hecha en la vista de cada día. El equipo recibe un aviso solo, automático, a las 10am el día que corresponde; también podés avisar vos con "Enviar push" cuando haga falta.</p>
         </div>
 
         ${esVistaLectura ? selectorLocalHtml() : ""}
