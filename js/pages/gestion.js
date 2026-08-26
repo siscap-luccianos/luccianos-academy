@@ -294,6 +294,20 @@ function subitemsSoloLecturaHtml(t) {
     `;
 }
 
+/** Resumen de los días elegidos, en TEXTO ("Lunes, Viernes" o "18 de
+ *  agosto") — pedido explícito: "me gustaría que allí se vea los días
+ *  o fecha seleccionado así no tengo que hacer un paso extra de
+ *  desplegar". Mensual suma el mes actual al lado del número, pedido
+ *  aparte: "que en el mes figure el mes corriente". */
+function resumenDiasTexto(t) {
+    if (!t.dias.length) return "";
+    if (t.frecuencia === "mensual") {
+        const mes = new Date().toLocaleDateString("es-AR", { month: "long" });
+        return t.dias.map((d) => `${d} de ${mes}`).join(", ");
+    }
+    return t.dias.join(", ");
+}
+
 /** Badge de alcance ("Propios", "Uruguay", "Menos Franquicias"...) —
  *  pedido explícito: distinguir tareas genéricas (todos los locales,
  *  sin badge — es el caso más común, no hace falta remarcarlo) de las
@@ -339,6 +353,7 @@ function aplicaTareaHtml(t) {
                 <span class="tarea-gestion-txt">
                     <strong>${t.titulo}</strong>
                     <span>${t.detalle}</span>
+                    ${enUso ? `<span class="tarea-gestion-resumen-dias">${resumenDiasTexto(t)}</span>` : ""}
                 </span>
                 <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
                 ${badgesHtml ? `<span class="tarea-gestion-badges">${badgesHtml}</span>` : ""}
@@ -1283,6 +1298,32 @@ function bindCuerpoGestion() {
             else chk.removeAttribute("checked");
         });
 
+        // ✓/— de cada sub-ítem: se agrega como texto plano FIJO acá,
+        // no con CSS ":checked" en el documento exportado — reportado
+        // en vivo (2026-08-26): "Descargar PDF" seguía fallando con
+        // sub-ítems aunque ya no usara ":has()". El motor real detrás
+        // de esa descarga (html2canvas) reimplementa su propio motor
+        // de CSS y su soporte de pseudo-clases de estado en general es
+        // poco confiable, no solo ":has()" — texto fijo no le exige
+        // entender nada dinámico. No es "mentirle a la app": el
+        // checkbox está REALMENTE tildado o no, esto solo hace que ese
+        // estado real sea legible para un motor de PDF limitado — se
+        // saca el nodo agregado apenas termina de exportar (exportarAPdf
+        // clona el HTML de forma síncrona, así que esto alcanza).
+        const spansSubitem = document.querySelectorAll("#contenido-gestion-imprimible .subitem-gestion");
+        const marcasAgregadas = [];
+        spansSubitem.forEach((label) => {
+            const input = label.querySelector("input[type=checkbox]");
+            const span = label.querySelector("span");
+            if (!input || !span) return;
+            const marca = document.createElement("span");
+            marca.className = "subitem-gestion-marca";
+            marca.style.color = input.checked ? "#1a7a3c" : "#999";
+            marca.textContent = input.checked ? "✓ " : "— ";
+            span.before(marca);
+            marcasAgregadas.push(marca);
+        });
+
         // Se exporta EXACTAMENTE lo que está en pantalla en este
         // momento (el día activo), sin trucos — pedido explícito:
         // "no se le puede mentir a la app diciéndole que todo es el
@@ -1306,7 +1347,7 @@ function bindCuerpoGestion() {
         // respaldo por tamaño, es el respaldo por confiabilidad.
         exportarAPdf("contenido-gestion-imprimible", "Guía de Gestión");
 
-        paneles.forEach((panel) => { panel.style.display = estadoPrevio.get(panel); });
+        marcasAgregadas.forEach((marca) => marca.remove());
     });
 }
 
