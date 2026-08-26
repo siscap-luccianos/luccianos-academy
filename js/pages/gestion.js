@@ -1198,13 +1198,14 @@ function pushDiaBannerHtml() {
  *  que el check esté persistido (eso es Fase 2) — mide lo que hay
  *  tildado ahora mismo, tal como se pidió.
  *
- *  Pedido explícito: "el nombre de usuario debería estar al enviar el
- *  push, esté completa o incompleta la tarea, porque así se sabe
- *  quién envió ese push" — va en el TÍTULO, no al final del cuerpo:
- *  reportado en vivo que con la tarea incompleta (cuerpo ya largo,
- *  "Tareas incompletas ⚠️ — revisá qué falta en la app.") la firma
- *  quedaba afuera de la vista previa colapsada de Android, que corta
- *  el cuerpo a una sola línea. El título no se corta así. */
+ *  Orden de prioridad pedido explícito (2026-08-26): 1º el encabezado
+ *  del día/tarea ("es lo importante"), 2º completa/incompleta, 3º el
+ *  nombre de quien envía. Encabezado + estado van juntos en el
+ *  TÍTULO (corto, siempre visible completo, ej. "Lunes 25/8 ·
+ *  Incompleta ⚠️"); el nombre va al CUERPO, primero en su línea para
+ *  que no se corte — antes iba al final de un cuerpo largo
+ *  ("Tareas incompletas ⚠️ — revisá qué falta...") y la vista previa
+ *  colapsada de Android lo tapaba, reportado en vivo. */
 function bindPushDiaWrap(wrap) {
     function pintarBoton() {
         wrap.innerHTML = pushDiaBotonHtml();
@@ -1230,14 +1231,22 @@ function bindPushDiaWrap(wrap) {
         const completa = hayEstado && checks.every((c) => c.checked);
 
         const usuario = getUsuarioActual();
-        const titulo = usuario?.nombre ? `${usuario.nombre} · ${diaActivoEtiqueta || "Gestión de tareas"}` : (diaActivoEtiqueta || "Gestión de tareas");
+        // Orden de importancia pedido explícito: 1º el encabezado (qué
+        // día/tarea es — va en el TÍTULO, lo primero que se lee), 2º
+        // completa/incompleta (también en el título, corto — no se
+        // corta), 3º el nombre de quien envía (al CUERPO, es el dato
+        // menos crítico de los tres).
+        const estado = !hayEstado ? "" : completa ? "Completa ✅" : "Incompleta ⚠️";
+        const titulo = [diaActivoEtiqueta || "Gestión de tareas", estado].filter(Boolean).join(" · ");
 
         boton.disabled = true;
         boton.textContent = "Enviando...";
         try {
-            const cuerpo = !hayEstado
-                ? "Aviso desde Gestión de tareas."
-                : completa ? "Tareas completas ✅" : "Tareas incompletas ⚠️ — revisá qué falta en la app.";
+            // Nombre PRIMERO en el cuerpo (así nunca se corta, es lo
+            // menos importante pero se ve igual) + un detalle corto
+            // solo cuando aporta algo real.
+            const detalle = !hayEstado ? "Aviso desde Gestión de tareas." : completa ? "" : "Revisá qué falta en la app.";
+            const cuerpo = usuario?.nombre ? (detalle ? `${usuario.nombre} — ${detalle}` : usuario.nombre) : (detalle || "Gestión de tareas");
             const r = await mandarPushGestion(titulo, cuerpo, "#/gestion");
             if (!r?.ok) {
                 alert(r?.error || "No se pudo enviar el push — probá de nuevo.");
