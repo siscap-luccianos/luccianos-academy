@@ -905,7 +905,12 @@ export async function Gestion() {
 
         <div class="aviso-maqueta">
             ${Icon("idea", { size: 16 })}
-            <p>Elegí en qué días aplica cada tarea desde "Tareas" — Semanal o Mensual, vos decidís — y tildala como hecha en la vista de cada día. El equipo recibe un aviso solo, automático, a las 10am el día que corresponde; también podés avisar vos con "Enviar push" cuando haga falta.</p>
+            <div>
+                <p class="aviso-maqueta-titulo">Tareas</p>
+                <p>Configurá la frecuencia y los días de cada tarea desde "Tareas". Podés elegir Semanal o Mensual y definir cuándo aplica.</p>
+                <p>El equipo recibe un recordatorio automático a las 10:00&nbsp;h el día correspondiente. También podés enviar un aviso manual en cualquier momento con "Enviar push".</p>
+                <p>Cuando la tarea esté realizada, tildala como hecha desde la vista del día.</p>
+            </div>
         </div>
 
         ${esVistaLectura ? selectorLocalHtml() : ""}
