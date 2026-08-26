@@ -133,10 +133,13 @@ const registroTareas = new Map();
 let esVistaLectura = false;
 let sucursalActiva = "";
 
-/** "tareaId|dia" → {marcadoPor, hora} — checks "hecho" REALES de la
- *  sucursal activa (persistidos, ya no visuales). Se puebla en
- *  cargarDatos() y se usa al renderizar tareaHtml() y al guardar un
- *  toggle. Ver data/gestionChecks.js. */
+/** "tareaId|dia" → {marcadoPor, hora, hecho, subitems: Set<string>} —
+ *  checks REALES de la sucursal activa (persistidos, ya no
+ *  visuales) — hecho=true es "tarea completa"; subitems son los
+ *  índices tildados AUNQUE la tarea no esté completa (progreso a
+ *  medio camino, también persistido — ver data/gestionChecks.js). Se
+ *  puebla en cargarDatos() y se usa al renderizar tareaHtml() y al
+ *  guardar un toggle. */
 let checksActivos = {};
 
 /** Lista completa de Sucursales (nombre/país/esPropio) — se necesita
@@ -410,11 +413,15 @@ function tareaHtml(t, idUnico, dia) {
     // que hace falta saber cuál para guardar/leer el correcto.
     const atrId = ` data-tarea-id="${t.id}" data-dia="${dia}"`;
     const check = checksActivos[`${t.id}|${dia}`];
-    const hechoTexto = check ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
+    // check ahora existe también para tareas A MEDIAS (algún sub-ítem
+    // tildado, sin llegar a completa) — "hecha"/"Hecho ..." dependen
+    // de check.hecho (completa), no de que la fila exista.
+    const hechoTexto = check?.hecho ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
 
     if (t.subitems) {
+        const marcados = check?.subitems || new Set();
         return `
-            <div class="tarea-gestion tarea-gestion-desplegable${check ? " hecha" : ""}" data-desplegable${atrId}>
+            <div class="tarea-gestion tarea-gestion-desplegable${check?.hecho ? " hecha" : ""}" data-desplegable${atrId}>
                 <button type="button" class="tarea-gestion-header" data-toggle-desplegable>
                     <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                     <span class="tarea-gestion-txt">
@@ -422,13 +429,13 @@ function tareaHtml(t, idUnico, dia) {
                         <span>${t.detalle}</span>
                         <span class="tarea-gestion-hora" data-hora>${hechoTexto}</span>
                     </span>
-                    <span class="tarea-gestion-progreso" data-progreso>${check ? t.subitems.length : 0}/${t.subitems.length}</span>
+                    <span class="tarea-gestion-progreso" data-progreso>${marcados.size}/${t.subitems.length}</span>
                     <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
                 </button>
                 <div class="tarea-gestion-subitems" data-subitems>
                     ${t.subitems.map((s, is) => `
                         <label class="subitem-gestion" for="${id}-${is}">
-                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check"${esVistaLectura ? " disabled" : ""}${check ? " checked" : ""}>
+                            <input type="checkbox" id="${id}-${is}" class="subitem-gestion-check"${esVistaLectura ? " disabled" : ""}${marcados.has(String(is)) ? " checked" : ""}>
                             <span>${s}</span>
                         </label>
                     `).join("")}
@@ -439,9 +446,9 @@ function tareaHtml(t, idUnico, dia) {
     }
 
     return `
-        <div class="tarea-gestion tarea-gestion-simple${check ? " hecha" : ""}"${atrId}>
+        <div class="tarea-gestion tarea-gestion-simple${check?.hecho ? " hecha" : ""}"${atrId}>
             <label class="tarea-gestion-label" for="${id}">
-                <input type="checkbox" id="${id}" class="tarea-gestion-check"${esVistaLectura ? " disabled" : ""}${check ? " checked" : ""}>
+                <input type="checkbox" id="${id}" class="tarea-gestion-check"${esVistaLectura ? " disabled" : ""}${check?.hecho ? " checked" : ""}>
                 <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                 <span class="tarea-gestion-txt">
                     <strong>${t.titulo}</strong>
@@ -1071,10 +1078,11 @@ function bindTarjetaDesplegable(tarjeta) {
     // una lista capturada al abrir la página) — así "16/16" en vez de
     // "0/8" cuando se agregaron ítems nuevos, sin pedirlo por código.
     function actualizarProgreso() {
-        const subitems = contenedorSubitems.querySelectorAll(".subitem-gestion-check");
-        const hechos = Array.from(subitems).filter((s) => s.checked).length;
-        progreso.textContent = `${hechos}/${subitems.length}`;
-        const completa = subitems.length > 0 && hechos === subitems.length;
+        const subitems = Array.from(contenedorSubitems.querySelectorAll(".subitem-gestion-check"));
+        const marcados = [];
+        subitems.forEach((s, is) => { if (s.checked) marcados.push(is); });
+        progreso.textContent = `${marcados.length}/${subitems.length}`;
+        const completa = subitems.length > 0 && marcados.length === subitems.length;
         const yaEstabaCompleta = tarjeta.classList.contains("hecha");
         tarjeta.classList.toggle("hecha", completa);
         const hora = tarjeta.querySelector("[data-hora]");
@@ -1086,15 +1094,17 @@ function bindTarjetaDesplegable(tarjeta) {
             if (completa && !yaEstabaCompleta) hora.textContent = `Hecho ${horaAhora()}`;
             else if (!completa) hora.textContent = "";
         }
-        // Se guarda DE VERDAD solo cuando el estado completo/incompleto
-        // cambió — se persiste la tarea entera (completa o no), no
-        // sub-ítem por sub-ítem (ver data/gestionChecks.js).
-        if (completa !== yaEstabaCompleta) {
-            guardarCheckSucursal(tarjeta.dataset.tareaId, tarjeta.dataset.dia, completa, sucursalActiva).then((r) => {
-                if (r?.ok) return;
-                alert(r?.error || "No se pudo guardar — probá de nuevo.");
-            });
-        }
+        // Se guarda en CADA toque, no solo al llegar a completa —
+        // reportado en vivo (2026-08-26): con una tarea a mitad de
+        // camino (nunca llegó a completa) no había NINGUNA fila
+        // guardada, así que ese progreso se perdía con cualquier
+        // recarga de la app ("quedaba todo desmarcado"). Ahora se
+        // manda siempre la lista real de índices tildados junto con
+        // el booleano — ver data/gestionChecks.js.
+        guardarCheckSucursal(tarjeta.dataset.tareaId, tarjeta.dataset.dia, completa, sucursalActiva, marcados.map(String)).then((r) => {
+            if (r?.ok) return;
+            alert(r?.error || "No se pudo guardar — probá de nuevo.");
+        });
     }
 
     // Un solo listener por delegación cubre todos los checkboxes.
@@ -1427,19 +1437,20 @@ async function actualizarChecksEnDOM() {
     document.querySelectorAll("#contenido-gestion-imprimible .tarea-gestion[data-tarea-id][data-dia]").forEach((tarjeta) => {
         const clave = `${tarjeta.dataset.tareaId}|${tarjeta.dataset.dia}`;
         const check = checksActivos[clave];
-        const hechoTexto = check ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
+        const hechoTexto = check?.hecho ? `Hecho ${check.hora || ""}${check.marcadoPor ? ` · ${check.marcadoPor}` : ""}` : "";
         const hora = tarjeta.querySelector("[data-hora]");
         if (hora) hora.textContent = hechoTexto;
-        tarjeta.classList.toggle("hecha", !!check);
+        tarjeta.classList.toggle("hecha", !!check?.hecho);
 
         const checkSimple = tarjeta.querySelector(".tarea-gestion-check");
-        if (checkSimple) checkSimple.checked = !!check;
+        if (checkSimple) checkSimple.checked = !!check?.hecho;
 
         const subitems = tarjeta.querySelectorAll(".subitem-gestion-check");
         if (subitems.length) {
-            subitems.forEach((s) => { s.checked = !!check; });
+            const marcados = check?.subitems || new Set();
+            subitems.forEach((s, is) => { s.checked = marcados.has(String(is)); });
             const progreso = tarjeta.querySelector("[data-progreso]");
-            if (progreso) progreso.textContent = `${check ? subitems.length : 0}/${subitems.length}`;
+            if (progreso) progreso.textContent = `${marcados.size}/${subitems.length}`;
         }
     });
 }
