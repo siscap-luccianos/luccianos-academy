@@ -203,6 +203,17 @@ function frecuenciaTareaHtml(t) {
     `;
 }
 
+/** "D/M" (sin ceros a la izquierda, ej. "1/8") de un día de la semana
+ *  DENTRO de la semana actual (arranca domingo, mismo criterio que
+ *  toda la herramienta) — pedido explícito: "me gustaría que diga
+ *  Lunes 1/8, Martes 2/8, etc". */
+function fechaDelDiaSemana(nombreDia) {
+    const hoy = new Date();
+    const fecha = new Date(hoy);
+    fecha.setDate(hoy.getDate() + (DIAS.indexOf(nombreDia) - hoy.getDay()));
+    return `${fecha.getDate()}/${fecha.getMonth() + 1}`;
+}
+
 /** Pedido explícito: "que el selector de días me permita poner más de
  *  un día — los depósitos se hacen lunes y viernes". Pills, no un
  *  <select multiple> (mal en celular) — cada una prende/apaga un día,
@@ -213,10 +224,15 @@ function frecuenciaTareaHtml(t) {
  *  data-toggle-dia, mismo bindDiasControl) pero con números de día del
  *  mes (1..último día del mes actual) en vez de nombres de día — es la
  *  única diferencia real entre las dos, así que bindDiasControl no
- *  necesita saber que existen dos tipos. */
+ *  necesita saber que existen dos tipos.
+ *
+ *  Cada pill lleva la fecha real al lado — pedido explícito: "Lunes
+ *  1/8", "20/8" — así el Responsable ve de un vistazo CUÁNDO es cada
+ *  día, sin tener que calcularlo. */
 function diasControlHtml(t) {
     const esMensual = t.frecuencia === "mensual";
     const opciones = esMensual ? diasDelMesActual() : DIAS;
+    const mesActual = new Date().getMonth() + 1;
     // Solo lectura: pills como <span>, sin data-toggle-dia — no hay
     // nada que enganchar, ni forma de tocarlas por accidente.
     return `
@@ -226,7 +242,7 @@ function diasControlHtml(t) {
             <div class="dias-pills-tarea${esMensual ? " dias-pills-tarea-mes" : ""}">
                 ${opciones.map((d) => {
                     const activa = t.dias.includes(d);
-                    const etiqueta = esMensual ? d : d.slice(0, 2);
+                    const etiqueta = esMensual ? `${d}/${mesActual}` : `${d} ${fechaDelDiaSemana(d)}`;
                     return esVistaLectura
                         ? `<span class="pill-dia-tarea${activa ? " activa" : ""}" title="${d}">${etiqueta}</span>`
                         : `<button type="button" class="pill-dia-tarea${activa ? " activa" : ""}" data-toggle-dia="${d}" title="${d}">${etiqueta}</button>`;
