@@ -693,8 +693,14 @@ function calendarioMensualHtml(tareasMensuales) {
  *  recargar la página. Para Responsable de local/turno es simplemente
  *  "su" cuerpo de siempre, una sola vez. */
 function cuerpoGestionHtml() {
+    // Arranca oculto (style="display:none") — "Tareas" es la pestaña
+    // activa por defecto, y ahí no hay ningún día que exportar. Pedido
+    // explícito: "el botón exportar pdf que solo esté visible cuando
+    // estoy en día de la semana" — bindCuerpoGestion() lo muestra/
+    // oculta según la pestaña que se toque, junto con el resto del
+    // switcher de data-vista-dia.
     const botonExportar = sucursalActiva ? `
-        <button type="button" class="btn btn-secondary" id="btn-exportar-gestion">
+        <button type="button" class="btn btn-secondary" id="btn-exportar-gestion" style="display:none">
             ${Icon("descargar", { size: 16 })} Exportar a PDF
         </button>
     ` : "";
@@ -1219,6 +1225,11 @@ function bindCuerpoGestion() {
             document.querySelectorAll("[data-panel-dia]").forEach((panel) => {
                 panel.style.display = panel.dataset.panelDia === dia ? "" : "none";
             });
+            // "Exportar a PDF" solo tiene sentido con un día real
+            // activo — en "Tareas" no hay nada que exportar (ver la
+            // nota en cuerpoGestionHtml, botonExportar).
+            const btnExportar = document.getElementById("btn-exportar-gestion");
+            if (btnExportar) btnExportar.style.display = dia === "tareas" ? "none" : "";
         });
     });
 
@@ -1263,26 +1274,16 @@ function bindCuerpoGestion() {
             else chk.removeAttribute("checked");
         });
 
-        // La guía exportada es SIEMPRE la semana/mes completo, no "lo
-        // que se estaba mirando en pantalla" — pedido explícito
-        // (reportado en vivo): exportar desde "Tareas" (sin ningún día
-        // activo) daba un PDF vacío, ninguno de los paneles de día
-        // tenía display distinto de "none"; exportar desde un día
-        // puntual solo mostraba ESE día, no la semana entera. Antes de
-        // clonar el HTML (exportarAPdf lo hace de forma síncrona, ver
-        // origen.innerHTML ahí adentro), se muestran los paneles con
-        // contenido real y se ocultan los vacíos ("Sin tareas para
-        // este día todavía") — funciona igual para semanal (paneles
-        // por día de semana) y mensual (paneles por día del mes), es
-        // el mismo mecanismo data-panel-dia para los dos. Se restaura
-        // el estado de pantalla original apenas termina, así quien
-        // estaba mirando "Lunes" lo sigue viendo después de exportar.
-        const paneles = document.querySelectorAll("#contenido-gestion-imprimible .section[data-panel-dia]");
-        const estadoPrevio = new Map();
-        paneles.forEach((panel) => {
-            estadoPrevio.set(panel, panel.style.display);
-            panel.style.display = panel.querySelector(".tarea-gestion") ? "" : "none";
-        });
+        // Se exporta EXACTAMENTE lo que está en pantalla en este
+        // momento (el día activo), sin trucos — pedido explícito:
+        // "no se le puede mentir a la app diciéndole que todo es el
+        // mismo texto, lo que debe convertir a PDF es el diseño
+        // final, no como viene de la app". Un intento anterior de
+        // forzar todos los días a la vez (para que "Tareas" no diera
+        // un PDF vacío) se revirtió el mismo día por esto — en vez de
+        // eso, el botón directamente no se muestra si no hay un día
+        // activo (ver botonExportar en cuerpoGestionHtml y el
+        // switcher de data-vista-dia en bindCuerpoGestion).
 
         // soloDescarga:true (2026-08-26, revertido el mismo día): la idea
         // era que acá el reporte nunca es grande y el botón "Imprimir"
