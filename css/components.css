@@ -5795,30 +5795,26 @@ table.data-table tbody tr:hover{
     padding:4px 0;
 }
 
-/* Fila compartida "Enviar push" + "Exportar a PDF", al PIE de las
-   tareas del día activo (después de #contenido-gestion-imprimible) —
-   por FUERA de la tarjeta de la tarea, pedido explícito en dos
-   rondas: "el push está sobre la tarea y en el mockup está por
-   fuera, con una pill linda premium, y exportar justo al lado", y
-   después "está abajo en el mock, no arriba" (reubicada). Arranca
-   oculta (inline style), bindCuerpoGestion() la muestra al tocar una
-   pill de día. */
-.acciones-dia-gestion{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
+/* "Exportar a PDF" — acción de DÍA, sola al PIE del contenido
+   exportable (#contenido-gestion-imprimible) — pedido explícito, dos
+   rondas: primero sacada de adentro de la tarjeta de tarea, después
+   "está abajo en el mock, no arriba" (reubicada). Arranca oculta
+   (inline style), bindCuerpoGestion() la muestra al tocar una pill de
+   día. */
+#btn-exportar-gestion{
     margin-top:14px;
-    margin-bottom:22px;
-}
-.acciones-dia-gestion .btn{
-    padding:9px 16px;
-    font-size:13px;
 }
 
-/* Pill sólida (mismo par sólido/contorno que "Exportar a PDF" al
-   lado) — antes era un acento chico (fondo tenue) metido adentro de
-   la tarjeta; ahora que vive suelta en su propia fila necesita el
-   mismo peso visual que un botón real, no un detalle discreto. */
+/* Pill sólida "Enviar push", POR TAREA — sibling suelto DESPUÉS de
+   cada tarjeta (.tarea-gestion-push en tareaHtml, ver gestion.js),
+   antes era un acento chico (fondo tenue) metido ADENTRO de la
+   tarjeta. Reusa la clase .tarea-gestion-push a propósito: ya estaba
+   en la lista de "ocultar del PDF" de exportarPdf.js. */
+.tarea-gestion-push{
+    display:flex;
+    align-items:center;
+}
+
 .btn-enviar-push{
     display:inline-flex;
     align-items:center;
@@ -5836,15 +5832,10 @@ table.data-table tbody tr:hover{
 .btn-enviar-push:hover{ background:var(--gold-deep); border-color:var(--gold-deep); }
 .btn-enviar-push:disabled{ opacity:.6; cursor:default; }
 
-.push-dia-wrap{
-    display:flex;
-    align-items:center;
-}
-
 /* Banner de confirmación — pedido explícito: "sumar un banner enviar,
    así si presiono por error lo revierte". Reemplaza al botón adentro
-   de #push-dia-wrap (mismo lugar, no un modal aparte) hasta que se
-   toque "Confirmar envío" o "Cancelar". */
+   de .tarea-gestion-push (mismo lugar, no un modal aparte) hasta que
+   se toque "Confirmar envío" o "Cancelar". */
 .banner-confirmar-push{
     display:flex;
     align-items:center;
