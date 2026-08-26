@@ -5766,6 +5766,26 @@ table.data-table tbody tr:hover{
     color:var(--success);
 }
 
+/* Alcance de una tarea (Propios/Franquicias/país) — ver
+   alcanceBadgeHtml() en gestion.js. Mismo look que .badge-en-uso pero
+   en dorado, para no confundirse con "En uso"/"Sin usar" (que hablan
+   de otra cosa: si tiene días elegidos). Sin badge = aplica a todos,
+   el caso más común — no hace falta remarcar lo normal. */
+.badge-alcance-tarea{
+    flex-shrink:0;
+    align-self:center;
+    font-size:11px;
+    font-weight:700;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--gold-soft);
+    color:var(--gold);
+    white-space:nowrap;
+    max-width:140px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
 /* Checkboxes de "Días" en el modal Nueva/Editar tarea — fila real por
    ítem (contenido-sin-errores), no un <select multiple>. */
 .campo-dias-modal{ margin-top:14px; }
