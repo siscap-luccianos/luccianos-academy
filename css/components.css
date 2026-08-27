@@ -2175,6 +2175,43 @@ table.data-table tbody tr:hover{
     transform:translateX(calc(-50% + var(--tooltip-nudge, 0px))) translateY(0);
 }
 
+/* Variante azul, mismo mecanismo que .kpi-ayuda — pedido explícito
+   (Gestión de tareas): "el banner azul en celular queda gigante y no
+   permite ver entre el espacio que queda, quizás un tooltip sería
+   mejor con ese color que me gusta". Mismo --info/--info-soft que
+   tenía el banner grande que reemplaza (ver Gestion() en gestion.js),
+   solo que ahora arranca cerrado y no ocupa lugar fijo en la
+   pantalla. */
+.info-ayuda{
+    display:inline-flex;
+    align-items:center;
+    margin-left:6px;
+    border-bottom:none;
+    color:var(--info);
+    vertical-align:middle;
+}
+.info-ayuda::after{
+    left:50%;
+    right:auto;
+    background:var(--info-soft);
+    border-color:var(--info);
+    color:var(--text);
+    max-width:260px;
+    transform:translateX(calc(-50% + var(--tooltip-nudge, 0px))) translateY(-4px);
+}
+.info-ayuda::before{
+    left:50%;
+    border-bottom-color:var(--info);
+    transform:translateX(-50%) translateY(-1px);
+}
+.info-ayuda.arriba::before{
+    border-top-color:var(--info);
+}
+.info-ayuda:hover::after,
+.info-ayuda.mostrar-tooltip::after{
+    transform:translateX(calc(-50% + var(--tooltip-nudge, 0px))) translateY(0);
+}
+
 .celda-truncada{
     display:inline-block;
     max-width:130px;
@@ -5277,33 +5314,6 @@ table.data-table tbody tr:hover{
 
 .btn-enlace:hover { color: var(--gold-deep); }
 
-/* GUÍA DE GESTIÓN (pages/gestion.js) — maqueta de visualización, ver
-   el comment grande arriba de ese archivo para el contexto. */
-.aviso-maqueta{
-    display:flex;
-    align-items:flex-start;
-    gap:10px;
-    margin-top:18px;
-    padding:14px 16px;
-    background:var(--info-soft);
-    border:1px solid var(--info);
-    border-radius:var(--radius-sm);
-    color:var(--info);
-}
-.aviso-maqueta svg{ flex-shrink:0; margin-top:1px; }
-.aviso-maqueta p{ margin:0; font-size:13.5px; color:var(--text); }
-/* Banner de Gestión de tareas (gestion.js): título + varios párrafos,
-   no un solo bloque de texto corrido — más fácil de escanear.
-   ".aviso-maqueta p.aviso-maqueta-titulo" (dos clases) y no la clase
-   sola, para ganarle en especificidad a ".aviso-maqueta p" (margin:0)
-   sin necesitar !important. */
-.aviso-maqueta p.aviso-maqueta-titulo{
-    font-weight:800;
-    font-size:14px;
-    margin-bottom:6px;
-}
-.aviso-maqueta p + p{ margin-top:8px; }
-
 .lista-tareas-gestion{
     display:flex;
     flex-direction:column;
@@ -6155,8 +6165,9 @@ table.data-table tbody tr:hover{
     max-width:320px;
 }
 
-/* Aviso "solo lectura" — mismo lenguaje que .aviso-maqueta pero en
-   tono neutro (no es información, es una restricción de permiso). */
+/* Aviso "solo lectura" — mismo lenguaje de badge que el resto de la
+   app, en tono neutro (no es información, es una restricción de
+   permiso). */
 .aviso-solo-lectura{
     display:flex;
     align-items:center;

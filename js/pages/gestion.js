@@ -941,18 +941,17 @@ export async function Gestion() {
 
     [sucursales] = await Promise.all([getSucursales(), cargarDatos(sucursalActiva)]);
 
-    return `
-        ${Header("Gestión de tareas", "Organizá las tareas de tu local, por día o por mes")}
+    // Antes era un banner grande (.aviso-maqueta, título + 3 párrafos)
+    // — pedido explícito con captura real: "el banner azul en celular
+    // queda gigante y no permite ver entre el espacio que queda,
+    // quizás un tooltip sería mejor con ese color que me gusta".
+    // Mismo mecanismo que .mod-tooltip (kpiCard.js, "ⓘ" que explica
+    // una tarjeta), variante ".info-ayuda" con el mismo azul que
+    // tenía el banner — se abre solo al tocar, no ocupa lugar fijo.
+    const infoAyuda = `Configurá frecuencia y días desde &quot;Tareas&quot;.\nRecordatorio automático a las 10:00&nbsp;h — o avisá manual con &quot;Enviar push&quot;.\nTildá como hecha desde la vista del día.`;
 
-        <div class="aviso-maqueta">
-            ${Icon("idea", { size: 16 })}
-            <div>
-                <p class="aviso-maqueta-titulo">Tareas</p>
-                <p>Configurá la frecuencia y los días de cada tarea desde "Tareas". Podés elegir Semanal o Mensual y definir cuándo aplica.</p>
-                <p>El equipo recibe un recordatorio automático a las 10:00&nbsp;h el día correspondiente. También podés enviar un aviso manual en cualquier momento con "Enviar push".</p>
-                <p>Cuando la tarea esté realizada, tildala como hecha desde la vista del día.</p>
-            </div>
-        </div>
+    return `
+        ${Header("Gestión de tareas", `Organizá las tareas de tu local, por día o por mes <span class="mod-tooltip info-ayuda" data-tooltip-texto="${infoAyuda}">${Icon("idea", { size: 14 })}</span>`)}
 
         ${esVistaLectura ? selectorLocalHtml() : ""}
 
