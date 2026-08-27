@@ -2140,6 +2140,26 @@ table.data-table tbody tr:hover{
     opacity:1;
 }
 
+/* En touch (celular) no hay hover real — pero el navegador simula un
+   :hover "pegado" en lo último que se tocó hasta que se toca otra
+   cosa, así que la regla de :hover de arriba dejaba el tooltip
+   abierto para siempre en vez de cerrarse solo a los 2s (JS ya le
+   saca .mostrar-tooltip, pero el :hover pegado lo seguía mostrando
+   igual). Reportado en vivo, con captura: quedaba tapando los tabs
+   de abajo sin cerrarse. Acá se apaga la regla de :hover en
+   dispositivos sin hover real — solo queda el mecanismo de JS
+   (tooltips.js), que si cierra bien. */
+@media (hover: none){
+    .mod-tooltip:hover::before,
+    .mod-tooltip:hover::after{
+        opacity:0;
+    }
+    .mod-tooltip.mostrar-tooltip::before,
+    .mod-tooltip.mostrar-tooltip::after{
+        opacity:1;
+    }
+}
+
 /* Variante ⓘ para explicar qué significa una tarjeta/sección
    (KpiCard, encabezados de sección) — mismo mecanismo de .mod-tooltip,
    pero sin el subrayado punteado (no hay texto abreviado que aclarar
@@ -2178,10 +2198,13 @@ table.data-table tbody tr:hover{
 /* Variante azul, mismo mecanismo que .kpi-ayuda — pedido explícito
    (Gestión de tareas): "el banner azul en celular queda gigante y no
    permite ver entre el espacio que queda, quizás un tooltip sería
-   mejor con ese color que me gusta". Mismo --info/--info-soft que
-   tenía el banner grande que reemplaza (ver Gestion() en gestion.js),
-   solo que ahora arranca cerrado y no ocupa lugar fijo en la
-   pantalla. */
+   mejor con ese color que me gusta" (el azul de --info, solo en el
+   borde/flechita) — arranca cerrado y no ocupa lugar fijo en la
+   pantalla. Fondo SÓLIDO (--card), no --info-soft — reportado en
+   vivo, con captura: --info-soft es semitransparente (rgba,
+   pensada para fondos planos como el banner viejo) y acá dejaba
+   traslúcido el cuadro entero, con los tabs de abajo transparentando
+   a través del texto. */
 .info-ayuda{
     display:inline-flex;
     align-items:center;
@@ -2193,10 +2216,10 @@ table.data-table tbody tr:hover{
 .info-ayuda::after{
     left:50%;
     right:auto;
-    background:var(--info-soft);
+    background:var(--card);
     border-color:var(--info);
     color:var(--text);
-    max-width:260px;
+    max-width:230px;
     transform:translateX(calc(-50% + var(--tooltip-nudge, 0px))) translateY(-4px);
 }
 .info-ayuda::before{

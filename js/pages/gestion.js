@@ -948,7 +948,11 @@ export async function Gestion() {
     // Mismo mecanismo que .mod-tooltip (kpiCard.js, "ⓘ" que explica
     // una tarjeta), variante ".info-ayuda" con el mismo azul que
     // tenía el banner — se abre solo al tocar, no ocupa lugar fijo.
-    const infoAyuda = `Configurá frecuencia y días desde &quot;Tareas&quot;.\nRecordatorio automático a las 10:00&nbsp;h — o avisá manual con &quot;Enviar push&quot;.\nTildá como hecha desde la vista del día.`;
+    // Texto acotado a propósito, sin saltos de línea forzados (se
+    // deja envolver solo): el ícono vive justo arriba de los tabs de
+    // sección, con poco margen — reportado en vivo, con captura, que
+    // el texto largo de antes tapaba esos tabs por completo.
+    const infoAyuda = `Frecuencia y días desde &quot;Tareas&quot;. Push automático a las 10:00&nbsp;h, o manual con &quot;Enviar push&quot;. Marcá hecha desde la vista del día.`;
 
     return `
         ${Header("Gestión de tareas", `Organizá las tareas de tu local, por día o por mes <span class="mod-tooltip info-ayuda" data-tooltip-texto="${infoAyuda}">${Icon("idea", { size: 14 })}</span>`)}
