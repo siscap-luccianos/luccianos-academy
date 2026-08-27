@@ -12,9 +12,13 @@
    - "estado3": tres estados posibles — ok (verde) / incidencia
      (amarillo) / grave (rojo) — con un motivo elegido de una lista
      de chips (sin escribir), no texto libre.
-   - "numerico": un monto ($) — 0 = cuadra, cualquier otro valor es
-     la incidencia en sí misma, no hace falta explicarla aparte (ej.
-     "Saldo/diferencia" de una caja).
+   - "numerico": un monto ($) — arranca en 0 por DEFAULT (pedido
+     explícito: "los valores que están en cero deben quedar así por
+     default si está bien, si tiene incidencia cargarla") — nadie
+     tiene que confirmar "está todo bien" a propósito, el 0 YA ES la
+     respuesta; cualquier otro valor es la incidencia en sí misma, no
+     hace falta explicarla aparte (ej. "Saldo/diferencia" de una
+     caja).
 
    DOS encodings distintos acá, no confundirlos:
    1) Definición del catálogo (GestionTareas.subitems, un ítem por

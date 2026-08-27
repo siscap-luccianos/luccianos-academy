@@ -428,14 +428,22 @@ function subitemFilaHtml(id, is, raw, marca) {
     const { titulo, tipo, motivos } = parsearSubitem(raw);
 
     if (tipo === TIPOS_SUBITEM.NUMERICO) {
-        const tieneMarca = marca?.tipo === TIPOS_SUBITEM.NUMERICO;
-        const incidencia = tieneMarca && marca.valor !== 0;
+        // Arranca en 0, NO vacío — pedido explícito: "los valores que
+        // están en cero deben quedar así por default si está bien, si
+        // tiene incidencia cargarla". La mayoría de los días cuadra;
+        // pedirle a alguien que escriba "0" a propósito para confirmar
+        // "está todo bien" es fricción de más — el 0 YA ES la
+        // respuesta por defecto, listo para exportar/enviar sin tocar
+        // nada; recién hace falta escribir algo si hay una diferencia
+        // real.
+        const valor = marca?.tipo === TIPOS_SUBITEM.NUMERICO ? marca.valor : 0;
+        const incidencia = valor !== 0;
         return `
-            <div class="subitem-numerico${tieneMarca ? (incidencia ? " incidencia" : " ok") : ""}" data-subitem-tipo="numerico" data-subitem-indice="${is}">
+            <div class="subitem-numerico ${incidencia ? "incidencia" : "ok"}" data-subitem-tipo="numerico" data-subitem-indice="${is}">
                 <span>${escaparHtml(titulo)}</span>
                 <div class="subitem-numerico-campo">
                     <span>$</span>
-                    <input type="number" inputmode="numeric" class="input-numerico-subitem"${esVistaLectura ? " disabled" : ""} placeholder="0" value="${tieneMarca ? marca.valor : ""}">
+                    <input type="number" inputmode="numeric" class="input-numerico-subitem"${esVistaLectura ? " disabled" : ""} placeholder="0" value="${valor}">
                 </div>
             </div>
         `;
@@ -1101,6 +1109,7 @@ function horaAhora() {
  *  toque, si el backend rechaza se avisa y se revierte. */
 function bindCheckboxHecha(chk) {
     chk.addEventListener("change", () => {
+        ultimaEdicionLocalGestion = Date.now();
         const tarjeta = chk.closest(".tarea-gestion");
         const tareaId = tarjeta.dataset.tareaId;
         const dia = tarjeta.dataset.dia;
@@ -1199,19 +1208,21 @@ function bindFrecuenciaTarea(contenedor) {
 }
 
 /** Estado ACTUAL de una fila de sub-ítem, cualquiera sea su tipo —
- *  undefined si todavía no se respondió (checkbox sin tildar,
- *  estado3 sin ningún círculo tocado, numérico vacío). "Vacío" para
- *  numérico es el input SIN VALOR, no "0" — 0 es una respuesta real
- *  ("cuadra"), no lo mismo que "todavía no lo miré". A nivel de
- *  módulo (no solo adentro de bindTarjetaDesplegable) porque también
- *  la usa el push por tarea, para saber si hay incidencias — ver
- *  bindPushWrap. */
+ *  undefined si todavía no se respondió (checkbox sin tildar, estado3
+ *  sin ningún círculo tocado). Numérico NUNCA es undefined — arranca
+ *  en 0 por default (pedido explícito: "los valores que están en
+ *  cero deben quedar así por default si está bien, si tiene
+ *  incidencia cargarla"), así que ya cuenta como respondido desde el
+ *  primer render, sin que nadie tenga que confirmarlo a propósito. A
+ *  nivel de módulo (no solo adentro de bindTarjetaDesplegable) porque
+ *  también la usa el push por tarea, para saber si hay incidencias —
+ *  ver bindPushWrap. */
 function leerMarcaFilaSubitem(fila) {
     const tipo = fila.dataset.subitemTipo;
     if (tipo === TIPOS_SUBITEM.NUMERICO) {
         const input = fila.querySelector(".input-numerico-subitem");
-        if (!input || input.value === "") return undefined;
-        return { tipo: TIPOS_SUBITEM.NUMERICO, valor: Number(input.value) };
+        if (!input) return undefined;
+        return { tipo: TIPOS_SUBITEM.NUMERICO, valor: input.value === "" ? 0 : Number(input.value) };
     }
     if (tipo === TIPOS_SUBITEM.ESTADO3) {
         const estado = fila.dataset.estadoActual;
@@ -1241,6 +1252,7 @@ function bindTarjetaDesplegable(tarjeta) {
     // una lista capturada al abrir la página) — así "16/16" en vez de
     // "0/8" cuando se agregaron ítems nuevos, sin pedirlo por código.
     function actualizarProgreso() {
+        ultimaEdicionLocalGestion = Date.now();
         const filas = Array.from(contenedorSubitems.children);
         const marcados = [];
         filas.forEach((fila) => {
@@ -1701,6 +1713,12 @@ async function elegirLocalGestion(nombre) {
  *  abierta. Actualiza en el lugar, sin tocar pestañas ni desplegables. */
 async function actualizarChecksEnDOM() {
     if (!sucursalActiva) return;
+    // Salta este ciclo si hubo un toque local hace poco — el guardado
+    // (Apps Script, ~1-2s) puede no haber terminado todavía; leer
+    // ahora traería el estado VIEJO y pisaría el cambio recién hecho
+    // por un instante ("lo carga, lo quita, lo regresa", reportado en
+    // vivo). El próximo ciclo (20s después) ya lo va a agarrar bien.
+    if (Date.now() - ultimaEdicionLocalGestion < MARGEN_EDICION_LOCAL_MS) return;
     // Fuerza una lectura REALMENTE fresca — invalidar() acá tira tanto
     // la caché en memoria (20s) como la marca de frescura de
     // IndexedDB (hasta 5 min), que si no seguía devolviendo la copia
@@ -1746,6 +1764,19 @@ async function actualizarChecksEnDOM() {
 }
 
 let intervaloChecksGestion = null;
+
+/** Marca de tiempo del último tilde/toque LOCAL en cualquier check —
+ *  pedido explícito, con captura real: "el marcar sub-tareas las
+ *  carga, las quita, las regresa de nuevo". Causa real: el repaso de
+ *  fondo cada 20s (actualizarChecksEnDOM) puede llegar a leer el
+ *  backend justo en el hueco entre "tocaste algo" y "el guardado
+ *  (~1-2s de Apps Script) todavía no terminó de escribirse" — ese
+ *  repaso trae el estado VIEJO y pisa el cambio recién hecho por un
+ *  instante, hasta el próximo ciclo. Saltear un ciclo de repaso justo
+ *  después de un toque local evita la carrera: 20s es margen de sobra
+ *  para no perder nada real. */
+let ultimaEdicionLocalGestion = 0;
+const MARGEN_EDICION_LOCAL_MS = 4000;
 
 export function bindGestion() {
     // Selector de local (Admin/Supervisor/Capacitador) — bindAutocompleteSucursal
