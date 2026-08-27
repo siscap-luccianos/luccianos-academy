@@ -952,7 +952,7 @@ export async function Gestion() {
     // deja envolver solo): el ícono vive justo arriba de los tabs de
     // sección, con poco margen — reportado en vivo, con captura, que
     // el texto largo de antes tapaba esos tabs por completo.
-    const infoAyuda = `Frecuencia y días desde &quot;Tareas&quot;. Push automático a las 10:00&nbsp;h, o manual con &quot;Enviar push&quot;. Marcá hecha desde la vista del día.`;
+    const infoAyuda = `Asigná las tareas que correspondan a tu local. Recibirás un recordatorio automático a las 10am y también podrás avisar manualmente al completarlas. Luego, exportá el registro para un segundo control.`;
 
     return `
         ${Header("Gestión de tareas", `Organizá las tareas de tu local, por día o por mes <span class="mod-tooltip info-ayuda" data-tooltip-texto="${infoAyuda}">${Icon("idea", { size: 14 })}</span>`)}
