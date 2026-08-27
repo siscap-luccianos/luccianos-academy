@@ -458,13 +458,15 @@ function subitemFilaHtml(id, is, raw, marca) {
         const magnitud = Math.abs(valorGuardado);
         const signo = valorGuardado < 0 ? "-" : "+";
         const incidencia = valorGuardado !== 0;
+        // En $0 el signo no significa nada — ninguno de los dos botones
+        // arranca marcado (mismo criterio que al resetear desde "OK").
         return `
             <div class="subitem-numerico ${incidencia ? "incidencia" : "ok"}" data-subitem-tipo="numerico" data-subitem-indice="${is}" data-signo="${signo}">
                 <span>${escaparHtml(titulo)}</span>
                 <div class="subitem-numerico-control">
                     <div class="signo-toggle">
-                        <button type="button" class="signo-btn falta${signo === "-" ? " activo" : ""}" data-signo="-"${esVistaLectura ? " disabled" : ""}>Falta</button>
-                        <button type="button" class="signo-btn sobra${signo === "+" ? " activo" : ""}" data-signo="+"${esVistaLectura ? " disabled" : ""}>Sobra</button>
+                        <button type="button" class="signo-btn falta${incidencia && signo === "-" ? " activo" : ""}" data-signo="-"${esVistaLectura ? " disabled" : ""}>Falta</button>
+                        <button type="button" class="signo-btn sobra${incidencia && signo === "+" ? " activo" : ""}" data-signo="+"${esVistaLectura ? " disabled" : ""}>Sobra</button>
                     </div>
                     <div class="subitem-numerico-campo">
                         <span>$</span>
@@ -1424,6 +1426,7 @@ function bindTarjetaDesplegable(tarjeta) {
                 // sobre un ítem que ahora dice que está todo bien.
                 if (esOk) chips.querySelectorAll(".chip-motivo").forEach((c) => c.classList.remove("activo"));
             }
+            resetearNumericoParejo(estadoBtn);
             actualizarProgresoLocal();
             return;
         }
@@ -1432,22 +1435,20 @@ function bindTarjetaDesplegable(tarjeta) {
             const grupo = chip.parentElement;
             grupo.querySelectorAll(".chip-motivo").forEach((c) => c.classList.remove("activo"));
             chip.classList.add("activo");
-            sincronizarSignoDesdeMotivo(chip);
             actualizarProgresoLocal();
         }
     });
 
-    // Al elegir un motivo de "Faltante"/"Sobrante" en un ítem de 3
-    // estados (ej. "Efectivo — Caja 1"), precarga el mismo sentido en
-    // el toggle Falta/Sobra del ítem numérico de la MISMA caja/posnet
-    // (ej. "Saldo Caja 1") — pedido explícito, así no hay que elegirlo
-    // dos veces ni arriesgarse a que queden contradichos entre sí. El
-    // monto en $ lo sigue escribiendo la persona a mano.
-    function sincronizarSignoDesdeMotivo(chip) {
-        const texto = chip.textContent.trim().toLowerCase();
-        const signo = /falta/.test(texto) ? "-" : /sobra/.test(texto) ? "+" : null;
-        if (!signo) return;
-        const filaEstado3 = chip.closest(".subitem-estado3");
+    // Al marcar "OK" (verde) en un ítem de 3 estados (ej. "Efectivo —
+    // Caja 1"), resetea a 0 el numérico de la MISMA caja/posnet (ej.
+    // "Saldo Caja 1") — si el efectivo cuadra, el saldo cuadra solo,
+    // sin un segundo toque. El sentido Falta/Sobra y el monto son
+    // exclusivos del numérico — no se decide en ningún otro lado — así
+    // que si en cambio se marca incidencia, acá no se toca nada: la
+    // persona carga el valor real directamente en el numérico.
+    function resetearNumericoParejo(estadoBtn) {
+        if (estadoBtn.dataset.estado !== "ok") return;
+        const filaEstado3 = estadoBtn.closest(".subitem-estado3");
         const tituloEstado3 = filaEstado3?.querySelector(".subitem-estado3-fila > span")?.textContent.toLowerCase() || "";
         const sufijo = tituloEstado3.match(/\b(caja|posnet)\s*\d+/)?.[0] || "";
         const filasNumericas = Array.from(contenedorSubitems.querySelectorAll(".subitem-numerico"));
@@ -1455,8 +1456,14 @@ function bindTarjetaDesplegable(tarjeta) {
             ? filasNumericas.find((f) => f.querySelector(":scope > span")?.textContent.toLowerCase().includes(sufijo))
             : (filasNumericas.length === 1 ? filasNumericas[0] : null);
         if (!destino) return;
-        destino.dataset.signo = signo;
-        destino.querySelectorAll(".signo-btn").forEach((b) => b.classList.toggle("activo", b.dataset.signo === signo));
+        const input = destino.querySelector(".input-numerico-subitem");
+        if (input) input.value = "0";
+        // En $0 el signo no significa nada — ninguno de los dos botones
+        // queda marcado, para no dejar un "Falta"/"Sobra" en rojo o
+        // naranja al lado de un valor que en realidad está en cero.
+        destino.dataset.signo = "+";
+        destino.querySelectorAll(".signo-btn").forEach((b) => b.classList.remove("activo"));
+        actualizarColorNumerico(destino);
     }
 }
 
