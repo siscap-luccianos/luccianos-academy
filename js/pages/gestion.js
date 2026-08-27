@@ -1158,14 +1158,25 @@ function bindCheckboxHecha(chk) {
 
         tarjeta.classList.toggle("hecha", hechoNuevo);
         const hora = tarjeta.querySelector("[data-hora]");
-        if (hora) hora.textContent = hechoNuevo ? `Hecho ${horaAhora()}` : "";
+        // "Guardando..." mientras dura el ~1-1.5s real de Apps Script —
+        // pedido explícito: si no se avisa, quien marca puede irse de
+        // la página pensando que ya quedó, y el cambio no llega a
+        // impactar. Se deshabilita el checkbox por lo mismo, para que
+        // no se pueda destildar a mitad de un guardado en curso.
+        if (hora) hora.textContent = "Guardando...";
+        chk.disabled = true;
 
         guardarCheckSucursal(tareaId, dia, hechoNuevo, sucursalActiva).then((r) => {
-            if (r?.ok) return;
-            alert(r?.error || "No se pudo guardar — probá de nuevo.");
-            chk.checked = !hechoNuevo;
-            tarjeta.classList.toggle("hecha", !hechoNuevo);
-            if (hora) hora.textContent = !hechoNuevo ? `Hecho ${horaAhora()}` : "";
+            chk.disabled = false;
+            if (!r?.ok) {
+                alert(r?.error || "No se pudo guardar — probá de nuevo.");
+                chk.checked = !hechoNuevo;
+                tarjeta.classList.toggle("hecha", !hechoNuevo);
+                if (hora) hora.textContent = !hechoNuevo ? `Hecho ${horaAhora()}` : "";
+                return;
+            }
+            const nombre = getUsuarioActual()?.nombre || "";
+            if (hora) hora.textContent = hechoNuevo ? `Hecho ${horaAhora()}${nombre ? ` · ${nombre}` : ""}` : "";
         });
     });
 }
