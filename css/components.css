@@ -5922,10 +5922,20 @@ table.data-table tbody tr:hover{
     gap:8px;
     align-items:flex-start;
 }
-.subtarea-nueva-fila-principal textarea{ flex:1; }
+/* width:auto + min-width:0 pisan a propósito la regla global del
+   modal (".modal-body select/textarea { width:100% }", components.css
+   más arriba) — reportado en vivo, con captura: sin esto el <select>
+   de tipo (flex:0 0 auto, así que su ancho lo decide `width`, no
+   flex-basis) reclamaba el 100% de la FILA para sí solo y empujaba el
+   textarea a una tira angosta, envolviendo el placeholder letra por
+   letra en una columna altísima. min-width:0 además es necesario para
+   que un item flex con texto adentro pueda achicarse por debajo de su
+   ancho intrínseco (el default es min-width:auto, que se lo impide). */
+.subtarea-nueva-fila-principal textarea{ flex:1; width:auto; min-width:0; }
 
 .input-subtarea-nueva-tipo{
     flex:0 0 auto;
+    width:auto;
     padding:8px 10px;
     border-radius:var(--radius-sm);
     border:1px solid var(--line);
