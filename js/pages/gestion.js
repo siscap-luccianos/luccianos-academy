@@ -1355,9 +1355,13 @@ function bindTarjetaDesplegable(tarjeta) {
             // Solo se pisa el horario al COMPLETARSE recién ahora — si
             // ya estaba completa y se vuelve a guardar (ej. se agregó
             // un ítem nuevo), no tiene sentido correr la hora sin que
-            // haya cambiado el estado real.
-            if (completa && !yaEstabaCompleta) hora.textContent = `Hecho ${horaAhora()}`;
-            else if (!completa) hora.textContent = "";
+            // haya cambiado el estado real. Con nombre de una — mismo
+            // formato que guarda el backend ("Hecho HH:MM · Nombre") —
+            // así se ve quién la completó sin esperar al repaso de 20s.
+            if (completa && !yaEstabaCompleta) {
+                const nombre = getUsuarioActual()?.nombre || "";
+                hora.textContent = `Hecho ${horaAhora()}${nombre ? ` · ${nombre}` : ""}`;
+            } else if (!completa) hora.textContent = "";
         }
 
         const textoOriginal = btnGuardar?.textContent;
