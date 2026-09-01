@@ -5493,6 +5493,7 @@ table.data-table tbody tr:hover{
 .subitem-gestion{
     display:flex;
     align-items:center;
+    flex-wrap:wrap;
     gap:10px;
     padding:9px 0;
     border-top:1px solid var(--line);
@@ -5502,6 +5503,12 @@ table.data-table tbody tr:hover{
 }
 .subitem-gestion:first-child{ border-top:1px solid var(--line); }
 .subitem-gestion input{ accent-color:var(--gold); width:17px; height:17px; flex-shrink:0; }
+/* Título — puede shrinkear/wrapear su propio texto en vez de empujar
+   la firma (ver .subitem-firma) fuera del margen. min-width:0 es lo
+   que de verdad habilita el shrink en un flex item con texto largo —
+   sin esto, un nombre largo en la firma de al lado desborda la fila
+   entera en celular (bug real reportado en vivo, 2026-08-31). */
+.subitem-gestion > span:not(.subitem-firma){ flex:1 1 auto; min-width:0; }
 
 /* Sub-ítem de 3 ESTADOS (ok/incidencia/grave) — pedido explícito, con
    maqueta confirmada: un arqueo de caja necesita poder marcar "hecho
@@ -5516,9 +5523,10 @@ table.data-table tbody tr:hover{
 .subitem-estado3-fila{
     display:flex;
     align-items:center;
+    flex-wrap:wrap;
     gap:10px;
 }
-.subitem-estado3-fila span{ flex:1; font-size:13.5px; color:var(--text); }
+.subitem-estado3-fila span:not(.subitem-firma){ flex:1; font-size:13.5px; color:var(--text); min-width:0; }
 
 .estados3{ display:flex; gap:6px; flex-shrink:0; }
 .estado-btn{
@@ -5548,13 +5556,14 @@ table.data-table tbody tr:hover{
 .subitem-estado2{
     display:flex;
     align-items:center;
+    flex-wrap:wrap;
     justify-content:space-between;
     gap:10px;
     padding:10px 0;
     border-top:1px solid var(--line);
 }
 .subitem-estado2:first-child{ border-top:1px solid var(--line); }
-.subitem-estado2 span{ font-size:13.5px; color:var(--text); }
+.subitem-estado2 > span:not(.subitem-firma){ flex:1 1 auto; min-width:0; font-size:13.5px; color:var(--text); }
 .estados2{ display:flex; gap:6px; flex-shrink:0; }
 .estado2-btn{
     padding:6px 14px;
@@ -5609,18 +5618,26 @@ table.data-table tbody tr:hover{
     border-top:1px solid var(--line);
 }
 .subitem-numerico:first-child{ border-top:1px solid var(--line); }
-.subitem-numerico span{ font-size:13.5px; color:var(--text); }
+.subitem-numerico > span:not(.subitem-firma){ font-size:13.5px; color:var(--text); flex:1 1 auto; min-width:0; }
 
-/* Envuelve el toggle Falta/Sobra + el campo "$" — juntos son el lado
-   derecho de la fila. Separado en dos partes a propósito: el teclado
-   numérico que abre <input inputmode="numeric"> en celular NO tiene
-   tecla "-" (bug real reportado en vivo, no se podía escribir un
-   negativo) — acá nunca hace falta escribirla, el signo se ELIGE. */
+/* Envuelve el toggle Cuadra/Falta/Sobra + el campo "$" — juntos son el
+   lado derecho de la fila. Separado en dos partes a propósito: el
+   teclado numérico que abre <input inputmode="numeric"> en celular NO
+   tiene tecla "-" (bug real reportado en vivo, no se podía escribir un
+   negativo) — acá nunca hace falta escribirla, el signo se ELIGE.
+   flex-wrap (2026-08-31, bug real en celular con captura): con los 3
+   botones del toggle + el campo "$", el conjunto puede pesar más que
+   el ancho disponible en un teléfono angosto — sin poder partirse en
+   dos líneas, el campo quedaba cortado justo en el borde de la
+   pantalla en vez de bajar solo a la línea siguiente. */
 .subitem-numerico-control{
     display:flex;
     align-items:center;
+    flex-wrap:wrap;
+    justify-content:flex-end;
     gap:8px;
-    flex-shrink:0;
+    flex:0 1 auto;
+    min-width:0;
 }
 
 .signo-toggle{ display:flex; gap:4px; }
@@ -6604,14 +6621,23 @@ table.data-table tbody tr:hover{
 /* Firma por sub-ítem — pill chica, mismo tono dorado atenuado que el
    resto de la marca de identidad, para no competir con el color de
    ESTADO (verde/rojo/ámbar) que ya tiene cada tipo de sub-ítem. */
+/* Siempre en SU PROPIA línea (flex-basis:100%), nunca al lado del
+   título — un nombre largo ("Maximo Busquets ( Prueba )") ahí mismo
+   desbordaba la fila en celular (bug real reportado en vivo,
+   2026-08-31). Con esto el layout es el mismo pase lo que pase con el
+   largo del nombre: título arriba, firma abajo, siempre. */
 .subitem-firma{
+    display:inline-block;
+    max-width:100%;
+    flex:0 0 100%;
+    margin-top:2px;
     font-size:11px;
     color:var(--gold-deep);
     background:var(--gold-soft);
     padding:2px 8px;
     border-radius:999px;
-    white-space:nowrap;
-    flex-shrink:0;
+    white-space:normal;
+    overflow-wrap:break-word;
 }
 
 /* Banner de tarea cerrada (candado) — mismo verde de "completa" que
