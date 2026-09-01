@@ -186,3 +186,14 @@ export function obtenerHistoricoGestionReal(sucursal) {
 export function eliminarHistoricoGestionReal(ciclo) {
     return gasRequest("eliminarHistoricoGestion", { ciclo });
 }
+
+/** Horario del recordatorio automático de Gestión (10am por default) —
+ *  configurable por Admin (2026-08-31). Ver apps-script/Code.gs,
+ *  obtenerHorarioRecordatorioGestion/guardarHorarioRecordatorioGestion. */
+export function obtenerHorarioRecordatorioGestionReal() {
+    return gasRequest("obtenerHorarioRecordatorioGestion", {});
+}
+
+export function guardarHorarioRecordatorioGestionReal(hora) {
+    return gasRequest("guardarHorarioRecordatorioGestion", { hora });
+}

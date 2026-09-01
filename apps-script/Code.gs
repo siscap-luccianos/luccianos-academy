@@ -159,6 +159,8 @@ function _despachar(body, usuarioActual) {
         case "actualizarDiasGestionSucursal": return actualizarDiasGestionSucursal(body.tareaId, body.dias, body.frecuencia, usuarioActual);
         case "actualizarCheckGestion": return actualizarCheckGestion(body.tareaId, body.dia, body.hecho, usuarioActual, body.subitemsMarcados);
         case "reabrirTareaGestion": return reabrirTareaGestion(body.tareaId, body.dia, body.sucursal, usuarioActual);
+        case "obtenerHorarioRecordatorioGestion": return obtenerHorarioRecordatorioGestion(usuarioActual);
+        case "guardarHorarioRecordatorioGestion": return guardarHorarioRecordatorioGestion(body.hora, usuarioActual);
         case "obtenerHistoricoGestion": return obtenerHistoricoGestion(body.sucursal, usuarioActual);
         case "eliminarHistoricoGestion": return eliminarHistoricoGestion(body.ciclo, usuarioActual);
         case "enviarPushPrueba": return enviarPushPrueba(usuarioActual);
@@ -1282,6 +1284,41 @@ function enviarPushGestion(titulo, cuerpo, url, usuarioActual) {
 
 const _DIAS_SEMANA_GESTION = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
+/** Hora del recordatorio automático de Gestión — configurable por
+ *  Admin desde la app (2026-08-31, pedido explícito: "arma los push
+ *  manuales para que pueda decidir el horario"), antes fija en el
+ *  código (10am). Vive en Script Properties, no en una Sheet — es un
+ *  ajuste global de la red entera, no un dato por fila. Sin configurar
+ *  todavía, cae a 10 (el default de siempre) para no cambiar nada
+ *  hasta que un Admin lo toque una vez. */
+const _PROP_HORA_RECORDATORIO_GESTION = "RECORDATORIO_GESTION_HORA";
+
+function _horaRecordatorioGestion() {
+    const v = Number(PropertiesService.getScriptProperties().getProperty(_PROP_HORA_RECORDATORIO_GESTION));
+    return Number.isInteger(v) && v >= 0 && v <= 23 ? v : 10;
+}
+
+/** Lectura del horario configurado — solo Admin (mismo gate que
+ *  guardarlo; no hace falta que nadie más lo sepa). */
+function obtenerHorarioRecordatorioGestion(usuarioActual) {
+    if (usuarioActual.rol !== "admin") {
+        return { ok: false, error: "Solo Admin puede ver el horario del recordatorio." };
+    }
+    return { ok: true, hora: _horaRecordatorioGestion() };
+}
+
+function guardarHorarioRecordatorioGestion(hora, usuarioActual) {
+    if (usuarioActual.rol !== "admin") {
+        return { ok: false, error: "Solo Admin puede configurar el horario del recordatorio." };
+    }
+    const horaNum = Number(hora);
+    if (!Number.isInteger(horaNum) || horaNum < 0 || horaNum > 23) {
+        return { ok: false, error: "La hora tiene que ser un número entero entre 0 y 23." };
+    }
+    PropertiesService.getScriptProperties().setProperty(_PROP_HORA_RECORDATORIO_GESTION, String(horaNum));
+    return { ok: true, hora: horaNum };
+}
+
 /** true si esa tarea+sucursal+día ya está resuelta EN EL CICLO ACTUAL
  *  — pedido explícito 2026-08-31: "una tarea completada no vuelve a
  *  generar recordatorios durante ese ciclo". Antes esta función no
@@ -1298,6 +1335,15 @@ function _tareaYaResueltaEnCiclo(checksPorClave, tareaId, sucursal, dia, cicloEs
 }
 
 function _revisarRecordatoriosGestion() {
+    // El trigger corre CADA HORA (ver instalarTriggerRecordatoriosGestion)
+    // — acá adentro se decide si esta corrida puntual es la que
+    // realmente tiene que avisar, comparando contra el horario que
+    // configuró Admin (default 10, ver _horaRecordatorioGestion). Así
+    // cambiar el horario desde la app no requiere borrar y recrear
+    // ningún trigger de Apps Script.
+    const horaActual = Number(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "H"));
+    if (horaActual !== _horaRecordatorioGestion()) return;
+
     const hoy = new Date();
     const manana = new Date(hoy.getTime() + 24 * 60 * 60 * 1000);
     const diaSemanaHoy = _DIAS_SEMANA_GESTION[hoy.getDay()];
@@ -1340,20 +1386,32 @@ function _revisarRecordatoriosGestion() {
 
 /** Correr UNA SOLA VEZ desde el editor de Apps Script (elegir esta
  *  función en el desplegable de arriba de "Ejecutar", tocar Ejecutar)
- *  para instalar el trigger diario a las 10am — no hace falta tocar
- *  nada más. Si ya existe uno para esta función no crea otro, así que
- *  correrla de más no rompe nada. */
+ *  para instalar el trigger — no hace falta tocar nada más.
+ *
+ *  2026-08-31 — horario configurable desde la app (antes fijo a las
+ *  10am, un solo trigger diario a esa hora): ahora el trigger corre
+ *  CADA HORA, y _revisarRecordatoriosGestion decide puertas adentro si
+ *  esta hora es la configurada (ver _horaRecordatorioGestion) — así
+ *  cambiar el horario desde Admin no requiere tocar Apps Script de
+ *  nuevo. Por eso ahora esta función BORRA cualquier trigger viejo de
+ *  _revisarRecordatoriosGestion (el diario a las 10, de antes de este
+ *  cambio) antes de crear el nuevo — dejarlo habría duplicado los
+ *  avisos justo a las 10 (uno por cada trigger corriendo esa hora).
+ *  Correrla de nuevo más adelante sigue siendo seguro: siempre queda
+ *  UN solo trigger, nunca dos. */
 function instalarTriggerRecordatoriosGestion() {
-    const yaExiste = ScriptApp.getProjectTriggers().some(function (t) {
-        return t.getHandlerFunction() === "_revisarRecordatoriosGestion";
+    let borrados = 0;
+    ScriptApp.getProjectTriggers().forEach(function (t) {
+        if (t.getHandlerFunction() === "_revisarRecordatoriosGestion") {
+            ScriptApp.deleteTrigger(t);
+            borrados++;
+        }
     });
-    if (yaExiste) return "Ya existe un trigger para _revisarRecordatoriosGestion — no se creó otro.";
     ScriptApp.newTrigger("_revisarRecordatoriosGestion")
         .timeBased()
-        .everyDays(1)
-        .atHour(10)
+        .everyHours(1)
         .create();
-    return "Trigger creado — corre todos los días entre las 10:00 y 11:00 (hora del proyecto: " + Session.getScriptTimeZone() + ").";
+    return "Trigger horario instalado" + (borrados ? " (se reemplazó " + borrados + " trigger viejo)" : "") + " — corre cada hora, pero solo avisa en la hora configurada desde Admin (hoy: " + _horaRecordatorioGestion() + ":00, zona " + Session.getScriptTimeZone() + ").";
 }
 
 /** "Días" de una tarea, POR SUCURSAL (Fase 2 de Gestión semanal,

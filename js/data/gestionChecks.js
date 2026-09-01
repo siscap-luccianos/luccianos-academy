@@ -33,7 +33,7 @@
 =============================*/
 
 import { fetchSheet, invalidar } from "../services/dataSource.js";
-import { actualizarCheckGestionReal, reabrirTareaGestionReal, obtenerHistoricoGestionReal, eliminarHistoricoGestionReal } from "../services/google.js";
+import { actualizarCheckGestionReal, reabrirTareaGestionReal, obtenerHistoricoGestionReal, eliminarHistoricoGestionReal, obtenerHorarioRecordatorioGestionReal, guardarHorarioRecordatorioGestionReal } from "../services/google.js";
 import { getUsuarioActual } from "../services/auth.js";
 import { gestionChecksMock } from "./mock/gestionChecks.mock.js";
 import { gestionTareasSucursalMock } from "./mock/gestionTareasSucursal.mock.js";
@@ -232,4 +232,23 @@ export async function eliminarHistoricoGestion(ciclo, sucursal) {
     const r = await eliminarHistoricoGestionReal(ciclo);
     if (r?.ok) invalidar(HOJAS.GESTION_CHECKS);
     return r;
+}
+
+/** Horario del recordatorio automático (10am por default) — solo
+ *  Admin. En modo mock vive en memoria (se resetea al recargar la
+ *  página), no persiste de verdad: alcanza para probar el control en
+ *  la app sin backend real. */
+let horaRecordatorioMock = 10;
+
+export async function getHorarioRecordatorioGestion() {
+    if (USE_MOCK_DATA) return { ok: true, hora: horaRecordatorioMock };
+    return obtenerHorarioRecordatorioGestionReal();
+}
+
+export async function guardarHorarioRecordatorioGestion(hora) {
+    if (USE_MOCK_DATA) {
+        horaRecordatorioMock = Number(hora);
+        return { ok: true, hora: horaRecordatorioMock };
+    }
+    return guardarHorarioRecordatorioGestionReal(hora);
 }

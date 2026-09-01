@@ -48,7 +48,7 @@ import {
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
-import { getChecksPorSucursal, guardarCheckSucursal, reabrirTareaGestion, getHistoricoGestion, eliminarHistoricoGestion } from "../data/gestionChecks.js";
+import { getChecksPorSucursal, guardarCheckSucursal, reabrirTareaGestion, getHistoricoGestion, eliminarHistoricoGestion, getHorarioRecordatorioGestion, guardarHorarioRecordatorioGestion } from "../data/gestionChecks.js";
 import { invalidar } from "../services/dataSource.js";
 import { HOJAS } from "../config.js";
 import { AutocompleteSucursal, bindAutocompleteSucursal } from "../components/autocompleteSucursal.js";
@@ -1087,6 +1087,28 @@ function cuerpoGestionHtml() {
         </button>
     ` : "";
     const acciones = botonNueva ? `<div class="acciones-gestion-semanal">${botonNueva}</div>` : "";
+    // Recordatorio automático — horario configurable (2026-08-31,
+    // pedido explícito, maqueta confirmada), antes fijo a las 10am.
+    // Es un ajuste GLOBAL de toda la red (no por local), por eso vive acá
+    // arriba, junto a "+ Nueva tarea" — no depende de haber elegido un
+    // local. El valor real se trae async (ver bindCuerpoGestion) y
+    // reemplaza el placeholder "10:00" apenas llega.
+    const cardRecordatorio = esAdminActual() ? `
+        <div class="card-recordatorio-gestion">
+            <div class="card-recordatorio-header">
+                ${Icon("campana", { size: 16 })}
+                <span>Recordatorio automático</span>
+                <span class="badge-solo-admin">Solo Admin</span>
+            </div>
+            <p class="card-recordatorio-desc">A qué hora se avisa lo que quedó pendiente ese día, en todos los locales.</p>
+            <div class="card-recordatorio-control">
+                <select id="select-horario-recordatorio">
+                    ${Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}:00</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-primary" id="btn-guardar-horario-recordatorio">Guardar</button>
+            </div>
+        </div>
+    ` : "";
     const hayLocal = !esVistaLectura || !!sucursalActiva;
     // "Histórico" (2026-08-31) — Responsable de local siempre (va
     // directo a la suya); Admin/Supervisor solo después de elegir un
@@ -1181,6 +1203,7 @@ function cuerpoGestionHtml() {
     if (!hayLocal) {
         return `
             ${acciones}
+            ${cardRecordatorio}
             ${catalogoHtml}
         `;
     }
@@ -1236,6 +1259,7 @@ function cuerpoGestionHtml() {
 
     return `
         ${acciones}
+        ${cardRecordatorio}
 
         <div class="tabs-gestion" id="tabs-seccion-gestion">
             <button class="tab-gestion${vistaSeccion === "asignar" ? " activa" : ""}" data-vista-seccion="asignar">Asignar tareas</button>
@@ -2496,6 +2520,36 @@ function bindCuerpoGestion() {
     // Lecciones: encabezado + sub-tareas sueltas.
     document.getElementById("btn-nueva-tarea")?.addEventListener("click", () => abrirModalTarea());
     document.getElementById("btn-carga-masiva-tareas")?.addEventListener("click", () => abrirModalCargaMasiva());
+
+    // "Recordatorio automático" — horario configurable, solo Admin
+    // (2026-08-31). El <select> nace con "10:00" de placeholder (ver
+    // cuerpoGestionHtml); acá se pisa con el valor real apenas llega,
+    // sin bloquear el resto del render por este único dato.
+    const selectHorario = document.getElementById("select-horario-recordatorio");
+    if (selectHorario) {
+        getHorarioRecordatorioGestion().then((r) => {
+            if (r?.ok && selectHorario.isConnected) selectHorario.value = String(r.hora);
+        });
+        document.getElementById("btn-guardar-horario-recordatorio")?.addEventListener("click", (e) => {
+            const boton = e.currentTarget;
+            const textoOriginal = boton.textContent;
+            boton.disabled = true;
+            boton.textContent = "Guardando...";
+            guardarHorarioRecordatorioGestion(selectHorario.value).then((r) => {
+                boton.disabled = false;
+                if (!r?.ok) {
+                    alert(r?.error || "No se pudo guardar — probá de nuevo.");
+                    boton.textContent = textoOriginal;
+                    return;
+                }
+                boton.textContent = "✓ Guardado";
+                setTimeout(() => { boton.textContent = textoOriginal; }, 2000);
+            }).catch((err) => {
+                boton.disabled = false;
+                manejarFalloGuardadoGestion(err, () => { boton.textContent = textoOriginal; });
+            });
+        });
+    }
 
     // "Reabrir tarea" (candado, solo Admin) — delegado en el mismo
     // contenedor estable que "Exportar a PDF" de abajo, mismo motivo:
