@@ -1425,6 +1425,24 @@ function sanearInputMonto(input) {
  *  otro", dos dispositivos en el mismo local no se veían entre sí).
  *  Optimista, mismo patrón que bindDiasControl: la pantalla cambia al
  *  toque, si el backend rechaza se avisa y se revierte. */
+/** Bug real reportado en vivo (2026-08-31): "a veces dice Guardando...
+ *  pero no guarda" — quedaba PEGADO ahí para siempre. Causa: las 4
+ *  funciones de guardado de acá abajo (bindCheckboxHecha, guardarAhora,
+ *  bindDiasControl, bindFrecuenciaTarea) solo tenían `.then(...)`, sin
+ *  `.catch(...)` — si `gasRequest` (services/google.js) TIRA una
+ *  excepción en vez de devolver `{ok:false}` (timeout de 20s, se cortó
+ *  la conexión, sesión inválida), esa promesa queda RECHAZADA y el
+ *  `.then` nunca corre — el botón se queda deshabilitado, mostrando
+ *  "Guardando..." de forma permanente, sin ningún aviso ni forma de
+ *  reintentar salvo recargar la página entera. Cada call site agrega
+ *  un `.catch` propio (revierte su estado optimista distinto), pero
+ *  todos avisan y loguean con esta misma función. */
+function manejarFalloGuardadoGestion(err, revertir) {
+    console.warn("Guardado de Gestión falló:", err?.message || err);
+    alert(err?.message || "No se pudo guardar — probá de nuevo.");
+    revertir();
+}
+
 function bindCheckboxHecha(chk) {
     chk.addEventListener("change", () => {
         const tarjeta = chk.closest(".tarea-gestion");
@@ -1471,6 +1489,13 @@ function bindCheckboxHecha(chk) {
                 checksActivos[`${tareaId}|${dia}`] = { ...checksActivos[`${tareaId}|${dia}`], hecho: true, marcadoPor: nombre, hora: horaAhora(), cerrada: true, cerradaPor: nombre, cerradaHora: horaAhora() };
                 recrearTareaEnPaneles(tareaId);
             }
+        }).catch((err) => {
+            chk.disabled = false;
+            manejarFalloGuardadoGestion(err, () => {
+                chk.checked = !hechoNuevo;
+                tarjeta.classList.toggle("hecha", !hechoNuevo);
+                if (hora) hora.textContent = !hechoNuevo ? `Hecho ${horaAhora()}` : "";
+            });
         });
     });
 }
@@ -1535,6 +1560,12 @@ function bindDiasControl(contenedor) {
                     // Revertir TODA la ráfaga (no solo el último toque) al estado de antes de empezarla.
                     tarea.dias = estado.diasPrevios;
                     recrearTareaEnPaneles(idTarea);
+                }).catch((err) => {
+                    timersDias.delete(idTarea);
+                    manejarFalloGuardadoGestion(err, () => {
+                        tarea.dias = estado.diasPrevios;
+                        recrearTareaEnPaneles(idTarea);
+                    });
                 });
             }, 700);
         });
@@ -1571,6 +1602,12 @@ function bindFrecuenciaTarea(contenedor) {
                 tarea.frecuencia = nueva === "mensual" ? "semanal" : "mensual";
                 tarea.dias = diasPrevios;
                 recrearTareaEnPaneles(idTarea);
+            }).catch((err) => {
+                manejarFalloGuardadoGestion(err, () => {
+                    tarea.frecuencia = nueva === "mensual" ? "semanal" : "mensual";
+                    tarea.dias = diasPrevios;
+                    recrearTareaEnPaneles(idTarea);
+                });
             });
         });
     });
@@ -1767,6 +1804,12 @@ function bindTarjetaDesplegable(tarjeta) {
                 checksActivos[clave] = { ...anterior, hecho: true, marcadoPor: nombre, hora: horaActual, marcas: marcasMap, firmas: firmasMap, cerrada: true, cerradaPor: nombre, cerradaHora: horaActual };
                 recrearTareaEnPaneles(tarjeta.dataset.tareaId);
             }
+        }).catch((err) => {
+            if (btnGuardar) btnGuardar.disabled = false;
+            manejarFalloGuardadoGestion(err, () => {
+                if (btnGuardar) btnGuardar.textContent = textoOriginal;
+                if (hora && completa) hora.textContent = "";
+            });
         });
     }
 
@@ -2437,7 +2480,7 @@ function bindCuerpoGestion() {
                     return;
                 }
                 renderHistoricoGestion();
-            });
+            }).catch((err) => manejarFalloGuardadoGestion(err, () => { btnEliminar.disabled = false; }));
         }
     });
 
@@ -2474,7 +2517,7 @@ function bindCuerpoGestion() {
             const clave = `${tareaId}|${dia}`;
             checksActivos[clave] = { ...checksActivos[clave], cerrada: false };
             recrearTareaEnPaneles(tareaId);
-        });
+        }).catch((err) => manejarFalloGuardadoGestion(err, () => { btn.disabled = false; }));
     });
 
     // "Exportar a PDF" — solo la Gestión semanal (es la única parte
