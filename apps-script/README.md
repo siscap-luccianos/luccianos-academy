@@ -48,8 +48,8 @@ es lo que el código pide.
 
 Hoja nueva, no está en la tabla original. Encabezados exactos, en este orden:
 
-| `id` | `icono` | `titulo` | `detalle` | `dias` | `subitems` | `aplicaA` | `noAplicaA` | `fechaModificacion` |
-|---|---|---|---|---|---|---|---|---|
+| `id` | `icono` | `titulo` | `detalle` | `dias` | `subitems` | `aplicaA` | `noAplicaA` | `recordatorioHabilitado` | `recordatorioHora` | `fechaModificacion` |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 `dias` y `subitems` van separados por coma en una sola celda (ej. `Lunes,Viernes` o `Abatidor,Armario,Vitrina`) — mismo criterio ya usado en `aplicaA`/`noAplicaA` de `Cursos`, no un esquema nuevo. `subitems` puede quedar vacío (no todas las tareas tienen sub-ítems). `fechaModificacion` es obligatoria como en cualquier hoja que se escribe desde la app (ver más abajo) — sin ella, `_actualizarCrudo` rechaza la escritura.
 

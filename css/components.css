@@ -6160,7 +6160,21 @@ table.data-table tbody tr:hover{
 
 .subtarea-nueva-fila-principal .input-subtarea-nueva-tipo{
     flex:0 0 auto;
-    width:auto;
+    /* Ancho FIJO, no auto (bug real reportado en vivo, con captura,
+       2026-08-31): un <select> con width:auto se dimensiona por su
+       opción MÁS LARGA ("2 estados (Hecho/No hecho)"), no por la
+       elegida — con "Simple" seleccionado, el control igual reclamaba
+       ~213px de la fila, dejándole ~30px al textarea de al lado (el
+       título envuelto letra por letra en una columna altísima, mismo
+       síntoma visual que el bug ya documentado arriba, pero causado
+       por esto, no por el width:100% que ese comentario soluciona).
+       Con un ancho fijo, la opción larga se corta con "..." en el
+       control cerrado — el texto completo se sigue viendo al abrir el
+       desplegable. */
+    width:112px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
     padding:8px 10px;
     border-radius:var(--radius-sm);
     border:1px solid var(--line);

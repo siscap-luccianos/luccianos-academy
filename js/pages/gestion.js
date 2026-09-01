@@ -789,6 +789,16 @@ Limpieza profunda de deck"></textarea>
         <label>¿A quién le aplica? (vacío = a todos)
             ${MultiSelectAlcance("input-tarea-alcance", tarea?.aplicaA || "")}
         </label>
+        <label class="campo-recordatorio-tarea">
+            <span class="check-recordatorio-tarea-label">
+                <input type="checkbox" id="input-tarea-recordatorio-habilitado" style="width:auto;display:inline-block;margin-right:8px"${tarea?.recordatorioHabilitado === "NO" ? "" : " checked"}>
+                Recordatorio automático habilitado
+            </span>
+            <select id="input-tarea-recordatorio-hora">
+                <option value="">Usar el horario general</option>
+                ${Array.from({ length: 24 }, (_, h) => `<option value="${h}"${String(h) === String(tarea?.recordatorioHora ?? "") ? " selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}
+            </select>
+        </label>
     `;
 }
 
@@ -919,7 +929,15 @@ async function confirmarTarea(idEditado = null) {
     // local) — se preserva lo que ya tuviera en vez de pisarlo con "",
     // por si se cargó a mano en la Sheet.
     const noAplicaA = registroTareas.get(idEditado)?.noAplicaA || "";
-    const datos = { icono, titulo, detalle, aplicaA, noAplicaA, ...(subitems.length ? { subitems } : {}) };
+    // Recordatorio por tarea (2026-08-31, pedido explícito: "el tema
+    // push quiero que sea por tarea") — reemplaza el horario único de
+    // antes. "hora" en blanco = usa el horario general (ver
+    // obtenerHorarioRecordatorioGestion/tarjeta "Recordatorio
+    // automático" en Asignar tareas), que ahora funciona como default
+    // para las tareas que no eligieron uno propio.
+    const recordatorioHabilitado = document.getElementById("input-tarea-recordatorio-habilitado")?.checked ? "SI" : "NO";
+    const recordatorioHora = document.getElementById("input-tarea-recordatorio-hora")?.value || "";
+    const datos = { icono, titulo, detalle, aplicaA, noAplicaA, recordatorioHabilitado, recordatorioHora, ...(subitems.length ? { subitems } : {}) };
 
     if (idEditado) {
         const r = await actualizarTareaBackend(idEditado, datos);
@@ -1100,7 +1118,7 @@ function cuerpoGestionHtml() {
                 <span>Recordatorio automático</span>
                 <span class="badge-solo-admin">Solo Admin</span>
             </div>
-            <p class="card-recordatorio-desc">A qué hora se avisa lo que quedó pendiente ese día, en todos los locales.</p>
+            <p class="card-recordatorio-desc">Horario general para las tareas que no tengan uno propio — cada tarea puede elegir el suyo (o apagar el recordatorio) en "+ Nueva tarea" / "Editar".</p>
             <div class="card-recordatorio-control">
                 <select id="select-horario-recordatorio">
                     ${Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}:00</option>`).join("")}

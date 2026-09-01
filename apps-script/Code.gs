@@ -1334,15 +1334,23 @@ function _tareaYaResueltaEnCiclo(checksPorClave, tareaId, sucursal, dia, cicloEs
     return String(check.hecho).toUpperCase() === "SI" || String(check.cerrada).toUpperCase() === "SI";
 }
 
+/** Hora efectiva de recordatorio de UNA tarea puntual, o null si la
+ *  tiene apagado — pedido explícito 2026-08-31: "el tema push quiero
+ *  que sea por tarea", reemplaza el horario único de antes. Sin hora
+ *  propia (recordatorioHora vacío), usa el horario general (Admin,
+ *  ver _horaRecordatorioGestion) como default. */
+function _horaEfectivaRecordatorio(tarea) {
+    if (String(tarea.recordatorioHabilitado || "SI").toUpperCase() === "NO") return null;
+    const propia = Number(tarea.recordatorioHora);
+    return Number.isInteger(propia) && propia >= 0 && propia <= 23 ? propia : _horaRecordatorioGestion();
+}
+
 function _revisarRecordatoriosGestion() {
     // El trigger corre CADA HORA (ver instalarTriggerRecordatoriosGestion)
-    // — acá adentro se decide si esta corrida puntual es la que
-    // realmente tiene que avisar, comparando contra el horario que
-    // configuró Admin (default 10, ver _horaRecordatorioGestion). Así
-    // cambiar el horario desde la app no requiere borrar y recrear
-    // ningún trigger de Apps Script.
+    // — cada tarea decide acá adentro si ESTA hora es la suya (propia o,
+    // sin una configurada, el horario general de Admin), así cambiar
+    // cualquier horario desde la app no requiere tocar Apps Script.
     const horaActual = Number(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "H"));
-    if (horaActual !== _horaRecordatorioGestion()) return;
 
     const hoy = new Date();
     const manana = new Date(hoy.getTime() + 24 * 60 * 60 * 1000);
@@ -1365,6 +1373,13 @@ function _revisarRecordatoriosGestion() {
         if (!tarea || !tarea.titulo) return;
         const dias = String(fila.dias || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
         if (!dias.length) return;
+
+        // Recordatorio por tarea — esta tarea puede tener su propio
+        // horario, o el recordatorio directamente apagado (horaEfectiva
+        // null). Sin esto, TODAS las tareas se revisaban a la hora
+        // general por igual.
+        const horaEfectiva = _horaEfectivaRecordatorio(tarea);
+        if (horaEfectiva === null || horaActual !== horaEfectiva) return;
 
         const destinatarios = _responsablesDeSucursal(fila.sucursal, null);
         if (!destinatarios.length) return;
@@ -1411,7 +1426,7 @@ function instalarTriggerRecordatoriosGestion() {
         .timeBased()
         .everyHours(1)
         .create();
-    return "Trigger horario instalado" + (borrados ? " (se reemplazó " + borrados + " trigger viejo)" : "") + " — corre cada hora, pero solo avisa en la hora configurada desde Admin (hoy: " + _horaRecordatorioGestion() + ":00, zona " + Session.getScriptTimeZone() + ").";
+    return "Trigger horario instalado" + (borrados ? " (se reemplazó " + borrados + " trigger viejo)" : "") + " — corre cada hora; cada tarea avisa en SU horario (o, sin uno propio, el general de Admin — hoy: " + _horaRecordatorioGestion() + ":00, zona " + Session.getScriptTimeZone() + ").";
 }
 
 /** "Días" de una tarea, POR SUCURSAL (Fase 2 de Gestión semanal,
