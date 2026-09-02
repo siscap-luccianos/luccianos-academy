@@ -3635,6 +3635,7 @@ async function actualizarCatalogoGestionEnDOM() {
 }
 
 let intervaloChecksGestion = null;
+let quitarVisibilidadGestion = null;
 
 /** Marca de tiempo del último tilde/toque LOCAL en cualquier check —
  *  pedido explícito, con captura real: "el marcar sub-tareas las
@@ -3678,7 +3679,7 @@ export function bindGestion() {
     // navegó a otra pantalla) — no hay hook de "salir de la página"
     // en este router, así que el propio intervalo se autochequea.
     if (intervaloChecksGestion) clearInterval(intervaloChecksGestion);
-    intervaloChecksGestion = setInterval(async () => {
+    const refrescoGestion = async () => {
         if (!document.getElementById("cuerpo-gestion")) {
             clearInterval(intervaloChecksGestion);
             intervaloChecksGestion = null;
@@ -3689,5 +3690,22 @@ export function bindGestion() {
         // así, si reconstruye, lo hace con el check más fresco posible.
         await actualizarChecksEnDOM();
         actualizarCatalogoGestionEnDOM();
-    }, 5000);
+    };
+    intervaloChecksGestion = setInterval(refrescoGestion, 5000);
+
+    // El setInterval de acá arriba se PAUSA solo mientras el celular
+    // tiene la pantalla bloqueada o se cambió de app (ahorro de
+    // batería del navegador) — al volver, el próximo tick de 5s no
+    // sale al toque, tarda lo que le falte del intervalo pausado. Con
+    // la pantalla apagada un rato largo, eso se sentía como "no se
+    // actualiza nunca solo, hay que tocar Actualizar a mano" (pedido
+    // explícito, reportado en vivo varias veces: "siempre el mismo
+    // problema"). Refrescar apenas la pestaña vuelve a estar visible
+    // saca esa espera — no hace falta esperar el próximo tick.
+    if (quitarVisibilidadGestion) quitarVisibilidadGestion();
+    const alVolverVisible = () => {
+        if (document.visibilityState === "visible") refrescoGestion();
+    };
+    document.addEventListener("visibilitychange", alVolverVisible);
+    quitarVisibilidadGestion = () => document.removeEventListener("visibilitychange", alVolverVisible);
 }
