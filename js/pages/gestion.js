@@ -114,7 +114,7 @@ let fechaDiaActivo = null;
 /** Claves "tareaId|dia" con cambios de sub-ítems tocados EN LOCAL pero
  *  todavía no guardados con el botón "Guardar" (ver bindTarjetaDesplegable,
  *  guardarAhora) — mientras haya al menos una, actualizarChecksEnDOM
- *  (el repaso de fondo cada 20s) se salta entero, para no pisar un
+ *  (el repaso de fondo cada 5s) se salta entero, para no pisar un
  *  progreso a medio marcar con lo último que SÍ llegó a guardarse. */
 const tareasSinGuardarGestion = new Set();
 
@@ -3442,7 +3442,7 @@ async function actualizarChecksEnDOM() {
     // la caché en memoria (20s) como la marca de frescura de
     // IndexedDB (hasta 5 min), que si no seguía devolviendo la copia
     // vieja sin pegarle al backend, aunque este refresco se dispare
-    // cada 20s. Sin esto el "casi en vivo" tardaba hasta 5 min en verse.
+    // cada 5s. Sin esto el "casi en vivo" tardaba hasta 5 min en verse.
     invalidar(HOJAS.GESTION_CHECKS);
     let frescos;
     try {
@@ -3460,7 +3460,7 @@ async function actualizarChecksEnDOM() {
         const dia = tarjeta.dataset.dia;
         const check = checksActivos[`${tareaId}|${dia}`];
         // Mismo criterio que tareaHtml — sin este chequeo acá, el
-        // repaso de fondo cada 20s pisaba el candado de "día
+        // repaso de fondo cada 5s pisaba el candado de "día
         // equivocado" que puso el render inicial, dejando la tarjeta
         // editable de nuevo a los 20s (bug real encontrado probando
         // este mismo fix: se veía bloqueada al abrir, pero se
@@ -3514,18 +3514,76 @@ async function actualizarChecksEnDOM() {
     });
 }
 
+/** Firma barata de un catálogo de tareas — para detectar "¿cambió de
+ *  verdad algo?" sin comparar objetos completos. Solo los campos que
+ *  se ven en pantalla; si el backend agrega uno nuevo que no se
+ *  muestra, no hace falta que dispare un refresco. */
+function firmaCatalogoGestion(tareas) {
+    return JSON.stringify(tareas.map((t) => [t.id, t.dias, t.frecuencia, t.titulo, t.detalle, t.icono, t.aplicaA, t.recordatorioHabilitado, t.recordatorioHora, (t.subitems || []).join("|")]));
+}
+
+/** Espejo de actualizarChecksEnDOM, pero para el CATÁLOGO — qué tareas
+ *  existen y qué días/frecuencia tiene cada una en ESTA sucursal.
+ *  Pedido explícito (2026-09-02): "el Responsable de local carga sus
+ *  tareas y no impacta al toque, hay que refrescar sí o sí" — el
+ *  repaso de 20s ya existente solo traía el "hecho" fresco (ver
+ *  arriba), nunca esto: un Admin mirando el mismo local, o el mismo
+ *  Responsable en otro celular, no veía una tarea nueva ni un día
+ *  agregado hasta recargar la página entera.
+ *
+ * Reconstruye TODO #cuerpo-gestion (mismo camino que elegirLocalGestion
+ * al cambiar de local) — pero SOLO si de verdad cambió algo
+ * (firmaCatalogoGestion), para no perder el desplegable/scroll de
+ * quien esté mirando algo puntual cada 5s porque sí. */
+async function actualizarCatalogoGestionEnDOM() {
+    if (!sucursalActiva) return;
+    // Mismos guards que actualizarChecksEnDOM — no pisar una edición
+    // en curso: sub-ítems sin guardar, un guardado de check reciente,
+    // o una ráfaga de días con el debounce todavía pendiente (ver
+    // bindDiasControl) — reconstruir el DOM ahí abajo perdería el
+    // toque que la persona acaba de hacer.
+    if (tareasSinGuardarGestion.size > 0) return;
+    if (timersDias.size > 0) return;
+    if (Date.now() - ultimaEdicionLocalGestion < MARGEN_EDICION_LOCAL_MS) return;
+
+    invalidar(HOJAS.GESTION_TAREAS);
+    invalidar(HOJAS.GESTION_TAREAS_SUCURSAL);
+    let catalogo, dias;
+    try {
+        [catalogo, dias] = await Promise.all([getTareas(), getDiasPorSucursal(sucursalActiva)]);
+    } catch (err) {
+        return; // silencioso — refresco de fondo, no una acción del usuario
+    }
+    catalogo.forEach((t) => {
+        const info = dias[t.id];
+        t.dias = info?.dias || [];
+        t.frecuencia = info?.frecuencia || "semanal";
+    });
+
+    if (firmaCatalogoGestion(catalogo) === firmaCatalogoGestion(TAREAS)) return; // nada cambió, no tocar el DOM
+
+    TAREAS = catalogo;
+    registroTareas.clear();
+    TAREAS.forEach((t) => registroTareas.set(t.id, t));
+
+    const cuerpo = document.getElementById("cuerpo-gestion");
+    if (!cuerpo) return;
+    cuerpo.innerHTML = cuerpoGestionHtml();
+    bindCuerpoGestion();
+}
+
 let intervaloChecksGestion = null;
 
 /** Marca de tiempo del último tilde/toque LOCAL en cualquier check —
  *  pedido explícito, con captura real: "el marcar sub-tareas las
  *  carga, las quita, las regresa de nuevo". Causa real: el repaso de
- *  fondo cada 20s (actualizarChecksEnDOM) puede llegar a leer el
+ *  fondo cada 5s (actualizarChecksEnDOM) puede llegar a leer el
  *  backend justo en el hueco entre "tocaste algo" y "el guardado
  *  (~1-2s de Apps Script) todavía no terminó de escribirse" — ese
  *  repaso trae el estado VIEJO y pisa el cambio recién hecho por un
  *  instante, hasta el próximo ciclo. Saltear un ciclo de repaso justo
- *  después de un toque local evita la carrera: 20s es margen de sobra
- *  para no perder nada real. */
+ *  después de un toque local evita la carrera: unos segundos de
+ *  margen alcanzan de sobra para que Apps Script termine de escribir. */
 let ultimaEdicionLocalGestion = 0;
 const MARGEN_EDICION_LOCAL_MS = 4000;
 
@@ -3552,18 +3610,22 @@ export function bindGestion() {
 
     bindCuerpoGestion();
 
-    // Refresco en segundo plano de los checks — cada 20s mientras se
+    // Refresco en segundo plano de los checks — cada 5s mientras se
     // esté en esta pantalla, sin recargar nada ni molestar lo que se
     // esté mirando. Se corta solo apenas el nodo desaparece (se
     // navegó a otra pantalla) — no hay hook de "salir de la página"
     // en este router, así que el propio intervalo se autochequea.
     if (intervaloChecksGestion) clearInterval(intervaloChecksGestion);
-    intervaloChecksGestion = setInterval(() => {
+    intervaloChecksGestion = setInterval(async () => {
         if (!document.getElementById("cuerpo-gestion")) {
             clearInterval(intervaloChecksGestion);
             intervaloChecksGestion = null;
             return;
         }
-        actualizarChecksEnDOM();
-    }, 20000);
+        // Primero los "hecho" (parcheo puntual, liviano); recién
+        // después el catálogo (puede reconstruir todo el cuerpo) —
+        // así, si reconstruye, lo hace con el check más fresco posible.
+        await actualizarChecksEnDOM();
+        actualizarCatalogoGestionEnDOM();
+    }, 5000);
 }
