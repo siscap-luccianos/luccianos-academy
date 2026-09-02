@@ -991,6 +991,60 @@ async function abrirDetalleNotificacion(noti, usuario) {
     }
 }
 
+/** Modal de resultado tras publicar — pedido explícito (2026-09-02):
+ *  "es importante saber si a las personas que se le envía News los
+ *  reciben". Un alert() con los nombres pegados en un párrafo se
+ *  probó y se frenó en el acto con captura real: "no tiene
+ *  coherencia esto si tengo 500 usuarios y hay 348 que no lo tienen".
+ *  Acá el número siempre se ve de un pantallazo (pill), y la lista
+ *  con nombres queda UN toque más allá — coherente con 18 o con 348,
+ *  nunca un bloque de texto ilegible. */
+function mostrarResultadoPushNews(resultado, onCerrar) {
+    const modalId = "modal-resultado-push-news";
+    const hayFaltantes = resultado.sinPush.length > 0;
+    const listaHtml = resultado.sinPush.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("");
+    abrirModal(`
+        <div class="modal-overlay" id="${modalId}">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Resultado del push</h2>
+                    <button class="modal-close" data-close="${modalId}">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin:0 0 14px">Enviado a <strong>${resultado.enviados}/${resultado.destinatarios}</strong> destinatarios.</p>
+                    ${hayFaltantes ? `
+                        <button type="button" class="pill-expandible-toggle" data-toggle-sin-push>
+                            <span class="badge badge-muted">${resultado.sinPush.length} sin push activado</span>
+                            <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
+                        </button>
+                        <div class="pill-expandible-lista" data-lista-sin-push hidden>${listaHtml}</div>
+                    ` : `<p class="text-sm text-success" style="margin:0">Todos los destinatarios tienen push activado.</p>`}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-close="${modalId}">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    `, modalId, null);
+    // abrirModal ya cierra el modal solo con estos mismos disparadores
+    // (los botones data-close y tocar el fondo) — acá se suma, además,
+    // avisarle a quien llamó (news.js navega a la lista recién cuando
+    // esto se cierra, no antes, para no dejarlo huérfano a mitad de
+    // camino).
+    if (onCerrar) {
+        const overlay = document.getElementById(modalId);
+        overlay?.querySelectorAll(`[data-close="${modalId}"]`).forEach((el) => el.addEventListener("click", onCerrar, { once: true }));
+        overlay?.addEventListener("click", (e) => { if (e.target === overlay) onCerrar(); }, { once: true });
+    }
+    document.querySelector(`#${modalId} [data-toggle-sin-push]`)?.addEventListener("click", (e) => {
+        const toggle = e.currentTarget;
+        const lista = document.querySelector(`#${modalId} [data-lista-sin-push]`);
+        if (!lista) return;
+        lista.hidden = !lista.hidden;
+        toggle.classList.toggle("abierto", !lista.hidden);
+    });
+}
+
 /** Push real a quienes puedan ver esta noticia — mismo criterio que
  *  puedeVerNoticia (campana/centro de avisos), así el destinatario del
  *  push es exactamente el mismo público que después la ve en News. No
@@ -1278,19 +1332,24 @@ export function bindNuevaNews(params = []) {
                     const [usuarios, sucursales] = await Promise.all([getUsuarios(), getSucursales()]);
                     const resultadoPush = await mandarPushDeNoticia(cambios, usuarios, sucursales);
                     // Pedido explícito (2026-09-02): "es importante saber si a
-                    // las personas que se le envía News los reciben" — mismo
-                    // criterio que "Enviado a N/M" en Gestión de tareas, pero
-                    // acá con nombres: quién de los destinatarios nunca activó
-                    // push es información accionable (pedirle a esa persona
-                    // puntual que lo active en Mi Perfil).
+                    // las personas que se le envía News los reciben". Primer
+                    // intento con un alert() de nombres pegados en un texto —
+                    // el usuario lo frenó en el acto probándolo con captura
+                    // real: "no tiene coherencia esto si tengo 500 usuarios y
+                    // hay 348 que no lo tienen". Un pill con el número
+                    // (mismo lenguaje visual que el badge de Colaboradores)
+                    // que se expande a la lista con scroll SOLO si hace
+                    // falta ver los nombres — coherente con 18 o con 348.
+                    //
+                    // navigate() queda a cargo del CIERRE del modal (no acá
+                    // abajo, incondicional) — el navigate de siempre ya
+                    // reconstruye el contenido de la página, y hacerlo con
+                    // el modal recién abierto lo dejaba huérfano antes de
+                    // que la persona llegara a verlo.
                     if (resultadoPush.destinatarios > 0) {
-                        const base = `Push enviado a ${resultadoPush.enviados}/${resultadoPush.destinatarios} destinatarios.`;
-                        if (resultadoPush.sinPush.length) {
-                            const MAX_NOMBRES = 10;
-                            const nombres = resultadoPush.sinPush.slice(0, MAX_NOMBRES).join(", ");
-                            const resto = resultadoPush.sinPush.length - MAX_NOMBRES;
-                            alert(`${base}\n\nSin push activado (${resultadoPush.sinPush.length}): ${nombres}${resto > 0 ? ` y ${resto} más` : ""}.`);
-                        }
+                        actualizarContadorCampana();
+                        mostrarResultadoPushNews(resultadoPush, () => navigate("news"));
+                        return;
                     }
                 } catch (err) {
                     console.warn("No se pudo mandar el push de la noticia:", err.message);
