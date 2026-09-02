@@ -99,6 +99,18 @@ let vistaSeccion = "asignar";
  *  bindPushWrap), pero "Exportar a PDF" sigue siendo por día. */
 let diaActivo = null;
 
+/** "toDateString()" del día real en que diaActivo se confirmó como
+ *  válido por última vez — sin esto, una pestaña que queda abierta de
+ *  un día para el otro seguía reabriendo el mismo día viejo para
+ *  siempre: "Domingo" es un valor SIEMPRE válido para
+ *  DIAS_VISUAL.includes(), así que el guard de más abajo nunca lo
+ *  consideraba "inválido" aunque ya hubiera pasado a ser semana
+ *  pasada. Bug real reportado en vivo (2026-09-02, captura): el
+ *  calendario marcaba bien HOY con el punto dorado, pero el panel
+ *  abierto seguía siendo un domingo ya bloqueado por
+ *  esDiaDeHoyGestion, de una visita de días atrás. */
+let fechaDiaActivo = null;
+
 /** Claves "tareaId|dia" con cambios de sub-ítems tocados EN LOCAL pero
  *  todavía no guardados con el botón "Guardar" (ver bindTarjetaDesplegable,
  *  guardarAhora) — mientras haya al menos una, actualizarChecksEnDOM
@@ -288,6 +300,47 @@ function fechaObjDiaSemana(nombreDia) {
     fecha.setDate(hoy.getDate() + (idxVisualObjetivo - idxVisualHoy));
     fecha.setHours(0, 0, 0, 0);
     return fecha;
+}
+
+/** Nombre de día de semana → día-del-mes (string), SOLO para los días
+ *  de ESTA semana que caen en el mes actual — ej. {Miércoles:"2",
+ *  Jueves:"3", ...}. Base para panelParaTareaYDia() de acá abajo. */
+function fechaDelMesPorDiaSemanaEstaSemana() {
+    const hoy = new Date();
+    const anio = hoy.getFullYear();
+    const mes = hoy.getMonth();
+    const mapa = {};
+    DIAS_VISUAL.forEach((nombre) => {
+        const f = fechaObjDiaSemana(nombre);
+        if (f.getFullYear() === anio && f.getMonth() === mes) mapa[nombre] = String(f.getDate());
+    });
+    return mapa;
+}
+
+/** En qué [data-panel-dia] vive REALMENTE una tarea+día — para una
+ *  semanal, el propio nombre de día, sin cambios. Para una MENSUAL
+ *  cuyo día-del-mes cae dentro de ESTA semana, el nombre de ESE día de
+ *  semana — se mezcla ahí, no en un panel de mes aparte.
+ *
+ * Bug real reportado en vivo (2026-09-02, con video): una tarea
+ * mensual asignada a "hoy" (o a cualquier día de esta semana) no
+ * aparecía en ningún lado alcanzable — el calendario ya hace apuntar
+ * ese día al panel SEMANAL (ver calendarioDiasHtml, nombrePorNumeroDia
+ * gana con el `||`), pero la tarjeta de la tarea mensual se seguía
+ * armando en un panel de MES aparte, con una clave distinta
+ * (data-panel-dia="2" en vez de "Miércoles") — invisible porque nada
+ * apuntaba ahí. Un día del mes que NO cae en esta semana (ej. el 29)
+ * sí funcionaba, porque para ese caso el calendario apunta
+ * directamente al panel de mes real.
+ *
+ * El "dia" que se usa para guardar/leer el check (ver tareaHtml,
+ * actualizarCheckGestion) NUNCA cambia acá — sigue siendo el día del
+ * mes real para una mensual; esta función solo decide DÓNDE vive la
+ * tarjeta en el DOM, no la clave con la que se guarda su estado. */
+function panelParaTareaYDia(tarea, dia) {
+    if (tarea.frecuencia !== "mensual") return dia;
+    const mapa = fechaDelMesPorDiaSemanaEstaSemana();
+    return Object.keys(mapa).find((nombre) => mapa[nombre] === String(dia)) || dia;
 }
 
 const MESES_CALENDARIO_GESTION = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -999,8 +1052,34 @@ function recrearTareaEnPaneles(idTarea) {
     // dias vacío = "sin usar" — el .forEach de abajo simplemente no
     // agrega ninguna copia, no hace falta un guard aparte.
     tarea.dias.forEach((d) => {
-        const lista = document.querySelector(`[data-panel-dia="${d}"] .lista-tareas-gestion`);
-        if (!lista) return;
+        // Una mensual cuyo día cae dentro de esta semana vive en el
+        // panel SEMANAL de ese día, no en uno de mes aparte — ver
+        // panelParaTareaYDia. "d" (la clave real de guardado) no
+        // cambia, solo dónde se busca/inserta la tarjeta.
+        const panel = panelParaTareaYDia(tarea, d);
+        let lista = document.querySelector(`[data-panel-dia="${panel}"] .lista-tareas-gestion`);
+        if (!lista) {
+            // Día del mes que NINGUNA tarea usaba todavía — su panel
+            // nunca se llegó a construir en el render inicial (solo
+            // se arman paneles para diasMesConContenido de ESE
+            // momento). Sin esto, la tarjeta quedaba sin ningún lugar
+            // donde aparecer hasta recargar la página entera (bug
+            // real reportado en vivo, 2026-09-02, con video). Los
+            // paneles semanales (Lunes..Domingo) SIEMPRE existen desde
+            // el inicio, así que esta rama en la práctica solo se
+            // ejecuta para un día-del-mes nuevo.
+            const contenedor = document.getElementById("contenido-gestion-imprimible");
+            if (!contenedor) return;
+            const tituloPanel = tarea.frecuencia === "mensual" ? `${panel}/${new Date().getMonth() + 1}` : `${panel} ${fechaDelDiaSemana(panel)}`;
+            contenedor.insertAdjacentHTML("beforeend", `
+                <div class="section" data-panel-dia="${panel}" style="display:none">
+                    <h3>${tituloPanel}</h3>
+                    <div class="lista-tareas-gestion"></div>
+                </div>
+            `);
+            lista = contenedor.querySelector(`[data-panel-dia="${panel}"] .lista-tareas-gestion`);
+            if (!lista) return;
+        }
         // tareaHtml() devuelve DOS elementos hermanos (tarjeta + fila
         // de Push+Exportar) — buscarlos por atributo en vez de asumir
         // lastElementChild, que cambia según haya wrap o no
@@ -1029,6 +1108,12 @@ function recrearTareaEnPaneles(idTarea) {
     // también tiene que reflejar el estado nuevo — si no, queda
     // mostrando los días viejos hasta el próximo render.
     actualizarFilaAplica(idTarea);
+    // Un día-del-mes nuevo (o sacado) en una tarea MENSUAL tiene que
+    // verse reflejado en el calendario de "Tareas asignadas" — sin
+    // esto el punto nuevo recién aparecía recargando la página entera
+    // (reportado en vivo, 2026-09-02). No-op si el calendario no está
+    // en pantalla ahora mismo (ver actualizarCalendarioGestion).
+    actualizarCalendarioGestion();
 }
 
 /** Lee el form, valida (título + al menos un día) y guarda DE VERDAD
@@ -1547,15 +1632,36 @@ function cuerpoGestionHtml() {
     // día de HOY (Lunes..Domingo) siempre resuelve a un panel real,
     // aunque esté vacío.
     const hoyClaveSemana = DIAS_VISUAL[(new Date().getDay() + 6) % 7];
-    if (!diaActivo || !(DIAS_VISUAL.includes(diaActivo) || diasMesConContenido.includes(diaActivo))) {
+    const hoyClaveFecha = new Date().toDateString();
+    // Si cambió el día real desde la última vez (pestaña que quedó
+    // abierta de una fecha para otra), se fuerza HOY sin importar qué
+    // día había quedado elegido — "Domingo" seguiría siendo "válido"
+    // para siempre si no se chequeara esto aparte.
+    if (fechaDiaActivo !== hoyClaveFecha || !diaActivo || !(DIAS_VISUAL.includes(diaActivo) || diasMesConContenido.includes(diaActivo))) {
         diaActivo = hoyClaveSemana;
+        fechaDiaActivo = hoyClaveFecha;
     }
 
-    const panelHtml = (d, titulo, tareasDelDia) => `
-        <div class="section" data-panel-dia="${d}"${d === diaActivo ? "" : ' style="display:none"'}>
+    // items[panel] = [{tarea, dia}] — "dia" es SIEMPRE la clave real
+    // de guardado (nombre de día para semanal, día-del-mes para
+    // mensual); "panel" es DÓNDE vive la tarjeta (panelParaTareaYDia
+    // los redirige al panel semanal cuando coinciden en esta semana).
+    // Se arma una sola vez acá para semanales Y mensuales por igual,
+    // en vez de dos .map() separados como antes — eso es justo lo que
+    // dejaba a una mensual de esta semana en un panel sin nadie
+    // apuntándole (bug real, ver panelParaTareaYDia).
+    const itemsPorPanel = {};
+    const agregarItem = (panel, tarea, dia) => {
+        (itemsPorPanel[panel] || (itemsPorPanel[panel] = [])).push({ tarea, dia });
+    };
+    tareasSemanales.forEach((t) => t.dias.forEach((d) => agregarItem(panelParaTareaYDia(t, d), t, d)));
+    tareasMensuales.forEach((t) => t.dias.forEach((d) => agregarItem(panelParaTareaYDia(t, d), t, d)));
+
+    const panelHtml = (panel, titulo, items) => `
+        <div class="section" data-panel-dia="${panel}"${panel === diaActivo ? "" : ' style="display:none"'}>
             <h3>${titulo}</h3>
             <div class="lista-tareas-gestion">
-                ${tareasDelDia.length ? tareasDelDia.map((t) => tareaHtml(t, `${t.id}-${d}`, d)).join("") : avisoDiaVacioHtml()}
+                ${items.length ? items.map(({ tarea, dia }) => tareaHtml(tarea, `${tarea.id}-${dia}`, dia)).join("") : avisoDiaVacioHtml()}
             </div>
         </div>
     `;
@@ -1565,8 +1671,16 @@ function cuerpoGestionHtml() {
     // nota en diasControlHtml), pedido explícito: "quiero cambiar la
     // semana que sea de lunes a domingo".
     const mesActual = new Date().getMonth() + 1;
-    const panelesSemanalesHtml = DIAS_VISUAL.map((d) => panelHtml(d, `${d} ${fechaDelDiaSemana(d)}`, tareasSemanales.filter((t) => t.dias.includes(d)))).join("");
-    const panelesMensualesHtml = diasMesConContenido.map((d) => panelHtml(d, `${d}/${mesActual}`, tareasMensuales.filter((t) => t.dias.includes(d)))).join("");
+    const panelesSemanalesHtml = DIAS_VISUAL.map((d) => panelHtml(d, `${d} ${fechaDelDiaSemana(d)}`, itemsPorPanel[d] || [])).join("");
+    // Los días de "diasMesConContenido" que ya se mezclaron arriba (su
+    // día-del-mes cae en esta semana) no necesitan un panel de mes
+    // aparte — quedaría duplicado y, peor, inalcanzable desde el
+    // calendario (que para esos días apunta al panel semanal).
+    const diasMesMezcladosEstaSemana = new Set(Object.values(fechaDelMesPorDiaSemanaEstaSemana()));
+    const panelesMensualesHtml = diasMesConContenido
+        .filter((d) => !diasMesMezcladosEstaSemana.has(d))
+        .map((d) => panelHtml(d, `${d}/${mesActual}`, itemsPorPanel[d] || []))
+        .join("");
 
     // "Exportar a PDF" YA NO vive acá suelto — se mudó adentro de
     // cada fila de tarea (junto al push de esa tarea, ver tareaHtml)
@@ -2638,6 +2752,14 @@ function prepararSubitemsParaExportar(contenedorId) {
  *  redibuje entero cada vez que se cambia de mes. */
 let mesHistoricoActivo = null;
 
+/** "toDateString()" del día real en que mesHistoricoActivo se
+ *  confirmó por última vez — mismo motivo que fechaDiaActivo más
+ *  arriba: un mes pasado elegido (o el default de "mes actual" de una
+ *  visita de días atrás) sigue siendo "válido" para siempre mientras
+ *  tenga ciclos archivados, así que sin esto una pestaña vieja seguía
+ *  reabriendo agosto en pleno septiembre. */
+let fechaMesHistoricoActivo = null;
+
 /** Día del mes (número, ej. 12) elegido en el calendario de Histórico —
  *  null = se ve la lista de ciclos completa (comportamiento por
  *  defecto), un número = se ve solo ese día puntual. Pedido explícito
@@ -2747,8 +2869,14 @@ async function renderHistoricoGestion() {
     mesesConCiclos.add(mesActualISO); // siempre elegible, aunque esté vacío
     const mesesOrdenados = [...mesesConCiclos].sort().reverse();
 
-    if (!mesHistoricoActivo || !mesesConCiclos.has(mesHistoricoActivo)) {
+    const hoyClaveFechaHistorico = new Date().toDateString();
+    // Si cambió el día real desde la última vez (pestaña que quedó
+    // abierta de un mes para el otro), se fuerza el mes actual sin
+    // importar si el mes elegido antes sigue teniendo ciclos
+    // archivados (¡casi siempre los tiene!) — ver fechaMesHistoricoActivo.
+    if (fechaMesHistoricoActivo !== hoyClaveFechaHistorico || !mesHistoricoActivo || !mesesConCiclos.has(mesHistoricoActivo)) {
         mesHistoricoActivo = mesActualISO;
+        fechaMesHistoricoActivo = hoyClaveFechaHistorico;
     }
 
     const selectorMesesHtml = mesesOrdenados.length > 1 ? `
@@ -2970,16 +3098,23 @@ function catalogoHistorico(tareaId) {
     return TAREAS.find((t) => t.id === tareaId) || registroTareas.get(tareaId);
 }
 
-/** Todo lo que hay que re-enganchar cada vez que #cuerpo-gestion se
- *  reconstruye — al cargar la página Y cada vez que Admin/Supervisor
- *  cambia de local en el selector (mismo contenido, nodos nuevos). */
-function bindCuerpoGestion() {
-    // Calendario de "Tareas asignadas" — data-vista-dia activa, muestra
-    // el [data-panel-dia] que matchea, oculta el resto. Vive DENTRO de
-    // #seccion-tareas-asignadas, así que solo importa mientras esa
-    // sección está visible. El día de HOY ya arranca activo (ver
-    // cuerpoGestionHtml, diaActivo) — este listener solo atiende los
-    // cambios manuales de ahí en más.
+/** Días de este mes con alguna tarea MENSUAL asignada — recalculado a
+ *  partir de TAREAS/sucursalActiva en vivo (no un valor guardado de
+ *  cuando se armó la página), para poder refrescar el calendario en
+ *  caliente cada vez que "Asignar tareas" agrega/saca un día mensual.
+ *  Mismo criterio de alcance que cuerpoGestionHtml(). */
+function diasMesConContenidoActual() {
+    const hayLocalAhora = !esVistaLectura || !!sucursalActiva;
+    const tareasParaLocal = hayLocalAhora ? TAREAS.filter((t) => aplicaASucursal(t, sucursalActivaObj())) : TAREAS;
+    return [...new Set(tareasParaLocal.filter((t) => t.frecuencia === "mensual").flatMap((t) => t.dias))].sort((a, b) => Number(a) - Number(b));
+}
+
+/** Click de un día del calendario de "Tareas asignadas" — data-vista-dia
+ *  activa, muestra el [data-panel-dia] que matchea, oculta el resto.
+ *  Factorizado (2026-09-02) para poder re-engancharlo también después
+ *  de actualizarCalendarioGestion(), que reemplaza el innerHTML del
+ *  calendario entero y por lo tanto pierde estos listeners. */
+function bindCalendarioDiasGestion() {
     document.querySelectorAll("#calendario-dias-gestion [data-vista-dia]").forEach((btn) => {
         btn.addEventListener("click", () => {
             document.querySelectorAll("#calendario-dias-gestion [data-vista-dia]").forEach((b) => b.classList.remove("activo"));
@@ -2994,6 +3129,31 @@ function bindCuerpoGestion() {
             // mostrando/ocultando acá arriba.
         });
     });
+}
+
+/** Refresca los puntitos del calendario de "Tareas asignadas" sin
+ *  reconstruir toda la sección — pedido explícito (2026-09-02,
+ *  reportado en vivo): "cuando elijo aplicar una tarea por mes no sale
+ *  en el calendario". Causa real: elegir un día-del-mes en "Asignar
+ *  tareas" solo reconstruía los PANELES de esa tarea (recrearTareaEnPaneles),
+ *  nunca el calendario — el punto nuevo recién aparecía si se recargaba
+ *  la página entera. Se llama junto con recrearTareaEnPaneles en
+ *  cualquier lugar que cambie t.dias/t.frecuencia. No-op si el
+ *  calendario no está en el DOM ahora mismo (ej. "Asignar tareas"
+ *  activa, o sin local elegido). */
+function actualizarCalendarioGestion() {
+    const grilla = document.getElementById("calendario-dias-gestion");
+    const contenedor = grilla?.closest(".calendario-gestion");
+    if (!contenedor) return;
+    contenedor.innerHTML = calendarioDiasHtml(diasMesConContenidoActual(), diaActivo);
+    bindCalendarioDiasGestion();
+}
+
+/** Todo lo que hay que re-enganchar cada vez que #cuerpo-gestion se
+ *  reconstruye — al cargar la página Y cada vez que Admin/Supervisor
+ *  cambia de local en el selector (mismo contenido, nodos nuevos). */
+function bindCuerpoGestion() {
+    bindCalendarioDiasGestion();
 
     // "Asignar tareas" / "Tareas asignadas" — pedido explícito, con
     // croquis: dos secciones separadas en vez de todo amontonado en
