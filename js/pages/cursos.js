@@ -828,16 +828,88 @@ export function bindCursos(params = []) {
         lightboxItems = items;
         lightboxIndice = indiceInicial;
         lightbox.hidden = false;
+        resetearZoomLightbox();
         actualizarLightbox();
     }
 
-    lightbox?.querySelector("[data-carrusel-lightbox-cerrar]").addEventListener("click", () => { lightbox.hidden = true; });
-    lightbox?.addEventListener("click", (e) => { if (e.target === lightbox) lightbox.hidden = true; });
+    // Zoom manual de la imagen ampliada — pedido explícito (2026-09-02):
+    // la app bloqueó el pellizco en TODA la interfaz ("fija, como
+    // WhatsApp"), pero acá adentro hace falta lo contrario: una foto de
+    // gramaje/receta con letra chica necesita poder acercarse para
+    // leerse. El bloqueo global es a nivel de <meta viewport> (afecta
+    // la PÁGINA entera, no se puede excluir un elemento con CSS solo),
+    // así que ESTA imagen puntual implementa su propio pellizco/doble-
+    // toque con JS — independiente del zoom nativo del navegador.
+    let zoomEscala = 1;
+    let zoomX = 0, zoomY = 0;
+    const ZOOM_MAX = 4;
+    const ZOOM_DOBLE_TOQUE = 2.5;
+
+    function aplicarTransformLightbox() {
+        if (!lightboxImg) return;
+        lightboxImg.style.transform = `translate(${zoomX}px, ${zoomY}px) scale(${zoomEscala})`;
+    }
+
+    function resetearZoomLightbox() {
+        zoomEscala = 1;
+        zoomX = 0;
+        zoomY = 0;
+        if (lightboxImg) lightboxImg.style.transform = "";
+    }
+
+    if (lightboxImg) {
+        let pellizcoDistanciaInicial = 0;
+        let escalaInicial = 1;
+        let arrastreInicio = null;
+        let ultimoToqueTs = 0;
+
+        const distanciaEntreToques = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+        lightboxImg.addEventListener("touchstart", (e) => {
+            if (e.touches.length === 2) {
+                pellizcoDistanciaInicial = distanciaEntreToques(e.touches[0], e.touches[1]);
+                escalaInicial = zoomEscala;
+            } else if (e.touches.length === 1) {
+                if (zoomEscala > 1) {
+                    arrastreInicio = { x: e.touches[0].clientX - zoomX, y: e.touches[0].clientY - zoomY };
+                }
+                const ahora = Date.now();
+                if (ahora - ultimoToqueTs < 300) {
+                    // Doble toque: alterna entre 1x y ZOOM_DOBLE_TOQUE.
+                    if (zoomEscala > 1) resetearZoomLightbox();
+                    else { zoomEscala = ZOOM_DOBLE_TOQUE; aplicarTransformLightbox(); }
+                }
+                ultimoToqueTs = ahora;
+            }
+        }, { passive: true });
+
+        lightboxImg.addEventListener("touchmove", (e) => {
+            if (e.touches.length === 2 && pellizcoDistanciaInicial > 0) {
+                e.preventDefault();
+                const distanciaActual = distanciaEntreToques(e.touches[0], e.touches[1]);
+                zoomEscala = Math.min(ZOOM_MAX, Math.max(1, escalaInicial * (distanciaActual / pellizcoDistanciaInicial)));
+                aplicarTransformLightbox();
+            } else if (e.touches.length === 1 && arrastreInicio) {
+                e.preventDefault();
+                zoomX = e.touches[0].clientX - arrastreInicio.x;
+                zoomY = e.touches[0].clientY - arrastreInicio.y;
+                aplicarTransformLightbox();
+            }
+        }, { passive: false });
+
+        lightboxImg.addEventListener("touchend", (e) => {
+            if (e.touches.length < 2) pellizcoDistanciaInicial = 0;
+            if (e.touches.length === 0) arrastreInicio = null;
+        });
+    }
+
+    lightbox?.querySelector("[data-carrusel-lightbox-cerrar]").addEventListener("click", () => { lightbox.hidden = true; resetearZoomLightbox(); });
+    lightbox?.addEventListener("click", (e) => { if (e.target === lightbox) { lightbox.hidden = true; resetearZoomLightbox(); } });
     lightbox?.querySelector("[data-carrusel-lightbox-prev]").addEventListener("click", () => {
-        if (lightboxIndice > 0) { lightboxIndice--; actualizarLightbox(); }
+        if (lightboxIndice > 0) { lightboxIndice--; resetearZoomLightbox(); actualizarLightbox(); }
     });
     lightbox?.querySelector("[data-carrusel-lightbox-next]").addEventListener("click", () => {
-        if (lightboxIndice < lightboxItems.length - 1) { lightboxIndice++; actualizarLightbox(); }
+        if (lightboxIndice < lightboxItems.length - 1) { lightboxIndice++; resetearZoomLightbox(); actualizarLightbox(); }
     });
 
     document.querySelectorAll("[data-carrusel]").forEach((wrap) => {
