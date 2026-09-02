@@ -1001,8 +1001,20 @@ async function abrirDetalleNotificacion(noti, usuario) {
  *  nunca un bloque de texto ilegible. */
 function mostrarResultadoPushNews(resultado, onCerrar) {
     const modalId = "modal-resultado-push-news";
-    const hayFaltantes = resultado.sinPush.length > 0;
-    const listaHtml = resultado.sinPush.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("");
+    // Los dos lados con el mismo trato — pedido explícito (2026-09-02,
+    // viendo el mismo patrón en Movimientos de gestión): "muestra si
+    // quienes tiene el push [también], no soy adivino". Ningún pill
+    // asume nada: los nombres de los dos lados están siempre a un
+    // toque, nunca hay que confiar en el número solo.
+    const pillLista = (clave, nombres, claseBadge, etiqueta) => nombres.length ? `
+        <button type="button" class="pill-expandible-toggle" data-toggle-lista="${clave}">
+            <span class="badge ${claseBadge}">${etiqueta}</span>
+            <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
+        </button>
+    ` : "";
+    const listaOculta = (clave, nombres) => nombres.length
+        ? `<div class="pill-expandible-lista" data-lista="${clave}" hidden>${nombres.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("")}</div>`
+        : "";
     abrirModal(`
         <div class="modal-overlay" id="${modalId}">
             <div class="modal">
@@ -1010,15 +1022,14 @@ function mostrarResultadoPushNews(resultado, onCerrar) {
                     <h2>Resultado del push</h2>
                     <button class="modal-close" data-close="${modalId}">✕</button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body" data-resultado-push>
                     <p style="margin:0 0 14px">Enviado a <strong>${resultado.enviados}/${resultado.destinatarios}</strong> destinatarios.</p>
-                    ${hayFaltantes ? `
-                        <button type="button" class="pill-expandible-toggle" data-toggle-sin-push>
-                            <span class="badge badge-muted">${resultado.sinPush.length} sin push activado</span>
-                            <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
-                        </button>
-                        <div class="pill-expandible-lista" data-lista-sin-push hidden>${listaHtml}</div>
-                    ` : `<p class="text-sm text-success" style="margin:0">Todos los destinatarios tienen push activado.</p>`}
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        ${pillLista("con-push", resultado.conPush, "badge-success", `${resultado.conPush.length} con push`)}
+                        ${pillLista("sin-push", resultado.sinPush, "badge-muted", `${resultado.sinPush.length} sin push`)}
+                    </div>
+                    ${listaOculta("con-push", resultado.conPush)}
+                    ${listaOculta("sin-push", resultado.sinPush)}
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" data-close="${modalId}">Cerrar</button>
@@ -1036,9 +1047,11 @@ function mostrarResultadoPushNews(resultado, onCerrar) {
         overlay?.querySelectorAll(`[data-close="${modalId}"]`).forEach((el) => el.addEventListener("click", onCerrar, { once: true }));
         overlay?.addEventListener("click", (e) => { if (e.target === overlay) onCerrar(); }, { once: true });
     }
-    document.querySelector(`#${modalId} [data-toggle-sin-push]`)?.addEventListener("click", (e) => {
-        const toggle = e.currentTarget;
-        const lista = document.querySelector(`#${modalId} [data-lista-sin-push]`);
+    document.querySelector(`#${modalId} [data-resultado-push]`)?.addEventListener("click", (e) => {
+        const toggle = e.target.closest("[data-toggle-lista]");
+        if (!toggle) return;
+        const clave = toggle.dataset.toggleLista;
+        const lista = document.querySelector(`#${modalId} [data-lista="${clave}"]`);
         if (!lista) return;
         lista.hidden = !lista.hidden;
         toggle.classList.toggle("abierto", !lista.hidden);
@@ -1052,27 +1065,30 @@ function mostrarResultadoPushNews(resultado, onCerrar) {
  *  vencido) — la noticia ya quedó guardada de todas formas, un push
  *  fallido no debería perder el contenido.
  *
- *  Devuelve {enviados, destinatarios, sinPush} — pedido explícito
- *  (2026-09-02): "es importante saber si a las personas que se le
- *  envía News los reciben". "sinPush" son destinatarios que NUNCA
- *  activaron push (sin ningún token registrado, ver data/tokens.js) —
+ *  Devuelve {enviados, destinatarios, conPush, sinPush} — pedido
+ *  explícito (2026-09-02): "es importante saber si a las personas que
+ *  se le envía News los reciben", y después "muestra si quienes tiene
+ *  el push [también], no soy adivino" — los dos lados, no solo el que
+ *  falta. "sinPush"/"conPush" son sobre si la persona ALGUNA VEZ
+ *  activó push (tiene un token registrado, ver data/tokens.js) —
  *  distinto de "fallidos" del backend (un token que SÍ existía pero
- *  FCM rechazó); acá interesa lo primero, es lo que se puede corregir
- *  pidiéndole a esa persona que active push en Mi Perfil. */
+ *  FCM lo rechazó); acá interesa lo primero, es lo que se puede
+ *  corregir pidiéndole a esa persona que lo active en Mi Perfil. */
 async function mandarPushDeNoticia(noticia, usuarios, sucursales) {
     const destinatarios = usuarios.filter((u) => puedeVerNoticia(noticia, u, sucursales));
-    if (!destinatarios.length) return { enviados: 0, destinatarios: 0, sinPush: [] };
+    if (!destinatarios.length) return { enviados: 0, destinatarios: 0, conPush: [], sinPush: [] };
     try {
         const [resultado, tokens] = await Promise.all([
             mandarPush(destinatarios.map((u) => u.id), noticia.titulo, noticia.resumen, "#/news"),
             getTokens(),
         ]);
         const idsConToken = new Set(tokens.map((t) => String(t.usuarioId)));
+        const conPush = destinatarios.filter((u) => idsConToken.has(String(u.id))).map((u) => u.nombre);
         const sinPush = destinatarios.filter((u) => !idsConToken.has(String(u.id))).map((u) => u.nombre);
-        return { enviados: resultado?.enviados ?? 0, destinatarios: destinatarios.length, sinPush };
+        return { enviados: resultado?.enviados ?? 0, destinatarios: destinatarios.length, conPush, sinPush };
     } catch (err) {
         console.warn("No se pudo mandar el push de la noticia:", err.message);
-        return { enviados: 0, destinatarios: destinatarios.length, sinPush: destinatarios.map((u) => u.nombre) };
+        return { enviados: 0, destinatarios: destinatarios.length, conPush: [], sinPush: destinatarios.map((u) => u.nombre) };
     }
 }
 

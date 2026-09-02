@@ -192,20 +192,29 @@ async function colaboradoresVisibles(usuario, usuarios) {
  *  nombres un toque más allá, nunca un bloque de texto. */
 function resumenPushHtml({ total, conPush, sinPush }) {
     if (!total) return "";
-    const listaHtml = sinPush.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("");
+    // Los dos lados con el mismo trato — pedido explícito (2026-09-02,
+    // viendo el pill "con push" sin forma de abrirlo): "y muestra si
+    // quienes tiene el push, no soy adivino". Ninguno de los dos
+    // pills asume nada: los nombres están siempre a un toque, para
+    // los dos casos.
+    const pillLista = (clave, nombres, claseBadge, etiqueta) => nombres.length ? `
+        <button type="button" class="pill-expandible-toggle" data-toggle-lista="${clave}">
+            <span class="badge ${claseBadge}">${etiqueta}</span>
+            <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
+        </button>
+    ` : `<span class="badge ${claseBadge}">${etiqueta}</span>`;
+    const listaOculta = (clave, nombres) => nombres.length
+        ? `<div class="pill-expandible-lista" data-lista="${clave}" hidden>${nombres.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("")}</div>`
+        : "";
     return `
-        <div class="section" style="margin-bottom:14px">
+        <div class="section" style="margin-bottom:14px" data-resumen-push>
             <p style="margin:0 0 8px;font-size:13px;color:var(--muted)">Push activado en tu equipo</p>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                <span class="badge badge-success">${conPush}/${total} con push</span>
-                ${sinPush.length ? `
-                    <button type="button" class="pill-expandible-toggle" data-toggle-sin-push-movimientos>
-                        <span class="badge badge-muted">${sinPush.length} sin push</span>
-                        <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
-                    </button>
-                ` : ""}
+                ${pillLista("con-push", conPush, "badge-success", `${conPush.length}/${total} con push`)}
+                ${pillLista("sin-push", sinPush, "badge-muted", `${sinPush.length} sin push`)}
             </div>
-            ${sinPush.length ? `<div class="pill-expandible-lista" data-lista-sin-push-movimientos hidden>${listaHtml}</div>` : ""}
+            ${listaOculta("con-push", conPush)}
+            ${listaOculta("sin-push", sinPush)}
         </div>
     `;
 }
@@ -243,8 +252,9 @@ export async function Movimientos() {
         const [usuarios, tokens] = await Promise.all([getUsuarios(), getTokens()]);
         const equipo = await colaboradoresVisibles(usuario, usuarios);
         const idsConPush = new Set(tokens.map((t) => String(t.usuarioId)));
+        const conPush = equipo.filter((u) => idsConPush.has(String(u.id)));
         const sinPush = equipo.filter((u) => !idsConPush.has(String(u.id)));
-        resumenPush = resumenPushHtml({ total: equipo.length, conPush: equipo.length - sinPush.length, sinPush: sinPush.map((u) => u.nombre) });
+        resumenPush = resumenPushHtml({ total: equipo.length, conPush: conPush.map((u) => u.nombre), sinPush: sinPush.map((u) => u.nombre) });
     }
 
     return `
@@ -263,9 +273,14 @@ function redibujarLista() {
 let intervaloMovimientos = null;
 
 export function bindMovimientos() {
-    document.querySelector("[data-toggle-sin-push-movimientos]")?.addEventListener("click", (e) => {
-        const toggle = e.currentTarget;
-        const lista = document.querySelector("[data-lista-sin-push-movimientos]");
+    // Un solo listener para los dos pills ("con push" y "sin push") —
+    // cada uno abre/cierra SU lista puntual, identificada por el mismo
+    // data-toggle-lista/data-lista (ver resumenPushHtml).
+    document.querySelector("[data-resumen-push]")?.addEventListener("click", (e) => {
+        const toggle = e.target.closest("[data-toggle-lista]");
+        if (!toggle) return;
+        const clave = toggle.dataset.toggleLista;
+        const lista = document.querySelector(`[data-resumen-push] [data-lista="${clave}"]`);
         if (!lista) return;
         lista.hidden = !lista.hidden;
         toggle.classList.toggle("abierto", !lista.hidden);
