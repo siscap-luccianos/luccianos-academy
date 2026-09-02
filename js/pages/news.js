@@ -38,6 +38,7 @@ import { gasRequest } from "../services/google.js";
 import { navigate } from "../router.js";
 import { actualizarContadorCampana, decrementarContadorCampana } from "../components/topbar.js";
 import { mandarPush } from "../services/push.js";
+import { getTokens } from "../data/tokens.js";
 
 // Categorías de noticia — texto libre, pero se recuerdan como pills
 // para reusar (pedido del usuario: "poner a gusto y que aparezca como
@@ -995,13 +996,29 @@ async function abrirDetalleNotificacion(noti, usuario) {
  *  push es exactamente el mismo público que después la ve en News. No
  *  bloquea la creación si el envío falla (modo demo, red, un token
  *  vencido) — la noticia ya quedó guardada de todas formas, un push
- *  fallido no debería perder el contenido. */
+ *  fallido no debería perder el contenido.
+ *
+ *  Devuelve {enviados, destinatarios, sinPush} — pedido explícito
+ *  (2026-09-02): "es importante saber si a las personas que se le
+ *  envía News los reciben". "sinPush" son destinatarios que NUNCA
+ *  activaron push (sin ningún token registrado, ver data/tokens.js) —
+ *  distinto de "fallidos" del backend (un token que SÍ existía pero
+ *  FCM rechazó); acá interesa lo primero, es lo que se puede corregir
+ *  pidiéndole a esa persona que active push en Mi Perfil. */
 async function mandarPushDeNoticia(noticia, usuarios, sucursales) {
+    const destinatarios = usuarios.filter((u) => puedeVerNoticia(noticia, u, sucursales));
+    if (!destinatarios.length) return { enviados: 0, destinatarios: 0, sinPush: [] };
     try {
-        const destinatarios = usuarios.filter((u) => puedeVerNoticia(noticia, u, sucursales)).map((u) => u.id);
-        if (destinatarios.length) await mandarPush(destinatarios, noticia.titulo, noticia.resumen, "#/news");
+        const [resultado, tokens] = await Promise.all([
+            mandarPush(destinatarios.map((u) => u.id), noticia.titulo, noticia.resumen, "#/news"),
+            getTokens(),
+        ]);
+        const idsConToken = new Set(tokens.map((t) => String(t.usuarioId)));
+        const sinPush = destinatarios.filter((u) => !idsConToken.has(String(u.id))).map((u) => u.nombre);
+        return { enviados: resultado?.enviados ?? 0, destinatarios: destinatarios.length, sinPush };
     } catch (err) {
         console.warn("No se pudo mandar el push de la noticia:", err.message);
+        return { enviados: 0, destinatarios: destinatarios.length, sinPush: destinatarios.map((u) => u.nombre) };
     }
 }
 
@@ -1259,7 +1276,22 @@ export function bindNuevaNews(params = []) {
                 // desaparece sin explicación.
                 try {
                     const [usuarios, sucursales] = await Promise.all([getUsuarios(), getSucursales()]);
-                    await mandarPushDeNoticia(cambios, usuarios, sucursales);
+                    const resultadoPush = await mandarPushDeNoticia(cambios, usuarios, sucursales);
+                    // Pedido explícito (2026-09-02): "es importante saber si a
+                    // las personas que se le envía News los reciben" — mismo
+                    // criterio que "Enviado a N/M" en Gestión de tareas, pero
+                    // acá con nombres: quién de los destinatarios nunca activó
+                    // push es información accionable (pedirle a esa persona
+                    // puntual que lo active en Mi Perfil).
+                    if (resultadoPush.destinatarios > 0) {
+                        const base = `Push enviado a ${resultadoPush.enviados}/${resultadoPush.destinatarios} destinatarios.`;
+                        if (resultadoPush.sinPush.length) {
+                            const MAX_NOMBRES = 10;
+                            const nombres = resultadoPush.sinPush.slice(0, MAX_NOMBRES).join(", ");
+                            const resto = resultadoPush.sinPush.length - MAX_NOMBRES;
+                            alert(`${base}\n\nSin push activado (${resultadoPush.sinPush.length}): ${nombres}${resto > 0 ? ` y ${resto} más` : ""}.`);
+                        }
+                    }
                 } catch (err) {
                     console.warn("No se pudo mandar el push de la noticia:", err.message);
                 }
