@@ -5887,6 +5887,13 @@ table.data-table tbody tr:hover{
     border-radius:var(--radius-sm);
     padding:16px;
     margin-top:18px;
+    /* Sin este tope, en desktop ".content" ocupa todo el ancho libre
+       (no tiene su propio max-width, ver css/layout.css) y como la
+       grilla es 7 columnas de 1fr con los días en aspect-ratio:1,
+       cada círculo terminaba estirado a lo gigante — bug real
+       reportado en vivo (2026-09-02). En mobile 480px ya es
+       prácticamente el ancho completo, así que no achica nada ahí. */
+    max-width:480px;
 }
 
 .calendario-gestion-mes{
