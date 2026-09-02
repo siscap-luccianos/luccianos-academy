@@ -975,49 +975,91 @@ export function bindCursos(params = []) {
         if (lightboxImg) lightboxImg.style.transform = "";
     }
 
-    if (lightboxImg) {
+    // Escucha en TODO el overlay (lightbox), no solo en el <img> — con
+    // object-fit:contain una foto vertical/apaisada deja franjas
+    // oscuras a los costados, y un pellizco real casi siempre arranca
+    // con al menos un dedo ahí afuera, no exactamente sobre el píxel
+    // de la imagen. Escuchando solo en la imagen, ese pellizco no
+    // arrancaba nunca — bug real, reportado en vivo en celular real
+    // (2026-09-02): "no deja [hacer zoom]". El transform sigue
+    // aplicándose a la imagen sola (aplicarTransformLightbox), esto
+    // solo cambia DÓNDE se detecta el gesto.
+    if (lightbox && lightboxImg) {
         let pellizcoDistanciaInicial = 0;
         let escalaInicial = 1;
         let arrastreInicio = null;
         let ultimoToqueTs = 0;
+        let inicioToqueTs = 0;
+        let huboMultiToque = false;
+        let huboMovimiento = false;
 
         const distanciaEntreToques = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
 
-        lightboxImg.addEventListener("touchstart", (e) => {
-            if (e.touches.length === 2) {
+        lightbox.addEventListener("touchstart", (e) => {
+            if (e.touches.length >= 2) {
+                // El SEGUNDO dedo de un pellizco llega en un touchstart
+                // aparte (el primero ya disparó su propio touchstart con
+                // length===1) — inicializar acá TAMBIÉN, no solo abajo
+                // en touchmove, para no perder el primer tramo del
+                // pellizco si el navegador ya manda el primer touchmove
+                // con la distancia ya cambiada.
+                huboMultiToque = true;
                 pellizcoDistanciaInicial = distanciaEntreToques(e.touches[0], e.touches[1]);
                 escalaInicial = zoomEscala;
+                arrastreInicio = null;
             } else if (e.touches.length === 1) {
+                huboMultiToque = false;
+                huboMovimiento = false;
+                inicioToqueTs = Date.now();
                 if (zoomEscala > 1) {
                     arrastreInicio = { x: e.touches[0].clientX - zoomX, y: e.touches[0].clientY - zoomY };
                 }
-                const ahora = Date.now();
-                if (ahora - ultimoToqueTs < 300) {
-                    // Doble toque: alterna entre 1x y ZOOM_DOBLE_TOQUE.
-                    if (zoomEscala > 1) resetearZoomLightbox();
-                    else { zoomEscala = ZOOM_DOBLE_TOQUE; aplicarTransformLightbox(); }
-                }
-                ultimoToqueTs = ahora;
             }
         }, { passive: true });
 
-        lightboxImg.addEventListener("touchmove", (e) => {
-            if (e.touches.length === 2 && pellizcoDistanciaInicial > 0) {
+        lightbox.addEventListener("touchmove", (e) => {
+            if (e.touches.length >= 2) {
                 e.preventDefault();
+                huboMultiToque = true;
+                huboMovimiento = true;
+                if (!pellizcoDistanciaInicial) {
+                    pellizcoDistanciaInicial = distanciaEntreToques(e.touches[0], e.touches[1]);
+                    escalaInicial = zoomEscala;
+                }
                 const distanciaActual = distanciaEntreToques(e.touches[0], e.touches[1]);
                 zoomEscala = Math.min(ZOOM_MAX, Math.max(1, escalaInicial * (distanciaActual / pellizcoDistanciaInicial)));
                 aplicarTransformLightbox();
             } else if (e.touches.length === 1 && arrastreInicio) {
                 e.preventDefault();
+                huboMovimiento = true;
                 zoomX = e.touches[0].clientX - arrastreInicio.x;
                 zoomY = e.touches[0].clientY - arrastreInicio.y;
                 aplicarTransformLightbox();
             }
         }, { passive: false });
 
-        lightboxImg.addEventListener("touchend", (e) => {
+        lightbox.addEventListener("touchend", (e) => {
             if (e.touches.length < 2) pellizcoDistanciaInicial = 0;
-            if (e.touches.length === 0) arrastreInicio = null;
+            if (e.touches.length > 0) return;
+            arrastreInicio = null;
+            // Doble toque evaluado acá, AL SOLTAR — no al apoyar el
+            // dedo. Apoyar el PRIMER dedo de un pellizco también
+            // dispara un touchstart de un solo toque; evaluarlo ahí
+            // confundía el inicio de un pellizco con un doble-toque y
+            // reseteaba el zoom justo cuando la persona empezaba a
+            // pellizcar — bug real, reportado en vivo en un celular
+            // real (2026-09-02): "no deja [hacer zoom]". Un doble
+            // toque de verdad es corto, sin moverse, y sin haber
+            // pasado por ningún momento de dos dedos.
+            if (huboMultiToque || huboMovimiento || Date.now() - inicioToqueTs >= 250) return;
+            const ahora = Date.now();
+            if (ahora - ultimoToqueTs < 300) {
+                if (zoomEscala > 1) resetearZoomLightbox();
+                else { zoomEscala = ZOOM_DOBLE_TOQUE; aplicarTransformLightbox(); }
+                ultimoToqueTs = 0;
+            } else {
+                ultimoToqueTs = ahora;
+            }
         });
     }
 
