@@ -31,7 +31,6 @@ import { getAsignacionesPorColaborador, crearAsignacion, actualizarAsignacion } 
 import { getResultadosPorColaborador } from "../data/resultados.js";
 import { registrarEvento } from "../data/auditoria.js";
 import { getUsuarioActual, estaViendoComo } from "../services/auth.js";
-import { navigate } from "../router.js";
 import { aplicaAlUsuario, leccionesDeLaPersona } from "../services/alcance.js";
 import { getDisponibilidad, mapaDisponibilidad } from "../data/disponibilidad.js";
 import { ES_ENTORNO_PRUEBA } from "../config.js";
@@ -468,6 +467,31 @@ function renderCuerpoLeccion(l, esActual, i, puedeMarcarVista = true) {
     `;
 }
 
+/** El HTML de la lista de lecciones obligatorias — separado de
+ *  renderDetalleCurso para poder reconstruir SOLO esto (ver el handler
+ *  de "Marcar como vista", más abajo) sin volver a pedir curso/
+ *  lecciones/asignaciones/resultados enteros de nuevo. */
+function filasLeccionesObligatoriasHtml(leccionesObligatorias, leccionesVistas, modoPrueba, puedeMarcarVista) {
+    return leccionesObligatorias.map((l, i) => {
+        const vista = i < leccionesVistas;
+        const esActual = modoPrueba ? !vista : i === leccionesVistas;
+        const bloqueada = modoPrueba ? false : i > leccionesVistas;
+
+        const cuerpo = (vista || esActual) ? renderCuerpoLeccion(l, esActual, i, puedeMarcarVista) : `<p class="text-sm text-muted" style="margin-top:6px">Completá la lección anterior para desbloquearla.</p>`;
+
+        return `
+            <div class="leccion-item${vista ? " vista" : ""}${bloqueada ? " bloqueada" : ""}">
+                <div class="leccion-item-header">
+                    <span class="leccion-numero">${vista ? Icon("check", { size: 14 }) : l.orden}</span>
+                    <h3>${l.titulo}</h3>${etiquetaVariante(l)}
+                    ${l.duracionMinutos ? `<span class="leccion-duracion">${l.duracionMinutos} min</span>` : ""}
+                </div>
+                ${cuerpo}
+            </div>
+        `;
+    }).join("");
+}
+
 async function renderDetalleCurso(usuario, cursoId) {
 
     const [cursos, todasLasLecciones, asignaciones, resultados] = await Promise.all([
@@ -547,24 +571,7 @@ async function renderDetalleCurso(usuario, cursoId) {
     // real a su propio id, como si fueran un colaborador más).
     const puedeMarcarVista = usuario.rol !== "supervisor" && usuario.rol !== "admin";
 
-    const filas = leccionesObligatorias.map((l, i) => {
-        const vista = i < leccionesVistas;
-        const esActual = modoPrueba ? !vista : i === leccionesVistas;
-        const bloqueada = modoPrueba ? false : i > leccionesVistas;
-
-        const cuerpo = (vista || esActual) ? renderCuerpoLeccion(l, esActual, i, puedeMarcarVista) : `<p class="text-sm text-muted" style="margin-top:6px">Completá la lección anterior para desbloquearla.</p>`;
-
-        return `
-            <div class="leccion-item${vista ? " vista" : ""}${bloqueada ? " bloqueada" : ""}">
-                <div class="leccion-item-header">
-                    <span class="leccion-numero">${vista ? Icon("check", { size: 14 }) : l.orden}</span>
-                    <h3>${l.titulo}</h3>${etiquetaVariante(l)}
-                    ${l.duracionMinutos ? `<span class="leccion-duracion">${l.duracionMinutos} min</span>` : ""}
-                </div>
-                ${cuerpo}
-            </div>
-        `;
-    }).join("");
+    const filas = filasLeccionesObligatoriasHtml(leccionesObligatorias, leccionesVistas, modoPrueba, puedeMarcarVista);
 
     // Opcionales: siempre visibles enteras (esActual=true, sin
     // "bloqueada" ni "vista" — no hay secuencia que respetar) y sin
@@ -714,6 +721,117 @@ async function renderDetalleCurso(usuario, cursoId) {
             <p class="carrusel-lightbox-caption" data-carrusel-lightbox-caption></p>
         </div>
     `;
+}
+
+/** Carrusel de capturas, el link de "vi el video" y "Marcar como
+ *  vista" — separado de bindCursos() para poder re-engancharlo SOLO
+ *  en el pedacito de lista que se reconstruye después de marcar una
+ *  lección como vista (ver el handler de data-marcar-vista, más
+ *  abajo), sin dejar el contenido opcional (su propia .leccion-list
+ *  aparte, que no se toca) sin enganchar. "raiz" es document en el
+ *  bind inicial de toda la página, o el <div class="leccion-list">
+ *  puntual cuando se reconstruye solo ese pedazo. */
+function bindLeccionesInteractivas(raiz, cursoId) {
+    raiz.querySelectorAll("[data-carrusel]").forEach((wrap) => {
+        const imgs = Array.from(wrap.querySelectorAll(".leccion-carrusel-img"));
+        const items = JSON.parse(decodeURIComponent(wrap.dataset.carruselItems));
+        const btnPrev = wrap.querySelector("[data-carrusel-prev]");
+        const btnNext = wrap.querySelector("[data-carrusel-next]");
+        const btnExpandir = wrap.querySelector("[data-carrusel-expandir]");
+        const contador = wrap.querySelector("[data-carrusel-contador]");
+        const caption = wrap.parentElement.querySelector("[data-carrusel-caption]");
+        let indice = 0;
+
+        function actualizar() {
+            imgs.forEach((img, i) => img.classList.toggle("activa", i === indice));
+            contador.textContent = `${indice + 1} / ${imgs.length}`;
+            if (caption) caption.textContent = items[indice].caption;
+            btnPrev.disabled = indice === 0;
+            btnNext.disabled = indice === imgs.length - 1;
+        }
+
+        btnPrev.addEventListener("click", () => {
+            if (indice > 0) { indice--; actualizar(); }
+        });
+        btnNext.addEventListener("click", () => {
+            if (indice < imgs.length - 1) { indice++; actualizar(); }
+        });
+        btnExpandir.addEventListener("click", () => abrirLightbox(items, indice));
+        imgs.forEach((img) => img.addEventListener("click", () => abrirLightbox(items, indice)));
+    });
+
+    raiz.querySelectorAll("[data-video-leccion]").forEach((link) => {
+        link.addEventListener("click", () => {
+            localStorage.setItem(claveVideoVisto(link.dataset.videoLeccion), "1");
+            const item = link.closest(".leccion-item");
+            const btnMarcar = item?.querySelector("[data-marcar-vista]");
+            if (btnMarcar) btnMarcar.disabled = false;
+            item?.querySelector(".aviso-ver-video")?.remove();
+        });
+    });
+
+    raiz.querySelectorAll("[data-marcar-vista]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            // Bloqueo sincrónico ANTES de cualquier await — sin esto, un
+            // doble click (o el mismo listener disparándose dos veces)
+            // podía leer "todavía no existe la asignación" en los dos
+            // casi al mismo tiempo y crear DOS filas en vez de
+            // actualizar una. Bug real encontrado en producción: varias
+            // filas de Asignaciones duplicadas con el mismo progreso.
+            if (btn.disabled) return;
+            btn.disabled = true;
+
+            const usuario = getUsuarioActual();
+            try {
+                const [todasLasLecciones, asignaciones] = await Promise.all([
+                    getLeccionesPorCurso(cursoId),
+                    getAsignacionesPorColaborador(usuario.id),
+                ]);
+                // Mismo filtro que el render (ver renderDetalleCurso) — una
+                // opcional nunca dispara este handler (no tiene botón), pero
+                // el TOTAL contra el que se calcula el % tiene que ser el
+                // mismo de los dos lados o el número final no coincide con
+                // lo que la persona ve en pantalla.
+                const lecciones = todasLasLecciones.filter((l) => l.obligatoria !== "NO");
+                let asignacion = asignaciones.find((a) => String(a.cursoId) === String(cursoId)) || null;
+
+                const idx = Number(btn.dataset.marcarVista);
+                const nuevasVistas = idx + 1;
+                const nuevoProgreso = Math.round((nuevasVistas / lecciones.length) * 100);
+                const nuevoEstado = nuevoProgreso >= 100 ? "completado" : "en_progreso";
+
+                if (asignacion) {
+                    await actualizarAsignacion(asignacion.id, { progreso: nuevoProgreso, estado: nuevoEstado });
+                } else {
+                    await crearAsignacion({ colaboradorId: usuario.id, cursoId, estado: nuevoEstado, progreso: nuevoProgreso });
+                }
+                registrarEvento(usuario.id, "avanzar_leccion", `${usuario.nombre} avanzó en el curso ${cursoId}`);
+
+                // En vez de navigate() (que vuelve a pedir curso, TODAS
+                // las lecciones, asignaciones Y resultados de nuevo, solo
+                // para volver a mostrar algo que ya sabemos porque
+                // acabamos de escribirlo) — reconstruye acá mismo, con lo
+                // que ya tenemos, la lista y la barra de progreso.
+                // Pedido explícito (2026-09-02): "se recarga toda la
+                // página y tarda mucho" (mismo reclamo que en News,
+                // arreglado ahí con el mismo criterio).
+                const modoPrueba = estaViendoComo() || usuario.rol === "supervisor" || usuario.rol === "admin";
+                const puedeMarcarVista = usuario.rol !== "supervisor" && usuario.rol !== "admin";
+                const lista = document.querySelector(".leccion-list");
+                if (lista) {
+                    lista.innerHTML = filasLeccionesObligatoriasHtml(lecciones, nuevasVistas, modoPrueba, puedeMarcarVista);
+                    bindLeccionesInteractivas(lista, cursoId);
+                }
+                const barra = document.querySelector(".curso-progreso-sticky .stat-progress-bar > i");
+                if (barra) barra.style.width = `${nuevoProgreso}%`;
+                const textoProgreso = document.querySelector(".curso-progreso-sticky p.text-sm");
+                if (textoProgreso) textoProgreso.textContent = `${nuevoProgreso}% completado · ${nuevasVistas}/${lecciones.length} lecciones`;
+            } catch (err) {
+                alert("No se pudo guardar el avance. Probá de nuevo.");
+                btn.disabled = false;
+            }
+        });
+    });
 }
 
 export function bindCursos(params = []) {
@@ -912,86 +1030,5 @@ export function bindCursos(params = []) {
         if (lightboxIndice < lightboxItems.length - 1) { lightboxIndice++; resetearZoomLightbox(); actualizarLightbox(); }
     });
 
-    document.querySelectorAll("[data-carrusel]").forEach((wrap) => {
-        const imgs = Array.from(wrap.querySelectorAll(".leccion-carrusel-img"));
-        const items = JSON.parse(decodeURIComponent(wrap.dataset.carruselItems));
-        const btnPrev = wrap.querySelector("[data-carrusel-prev]");
-        const btnNext = wrap.querySelector("[data-carrusel-next]");
-        const btnExpandir = wrap.querySelector("[data-carrusel-expandir]");
-        const contador = wrap.querySelector("[data-carrusel-contador]");
-        const caption = wrap.parentElement.querySelector("[data-carrusel-caption]");
-        let indice = 0;
-
-        function actualizar() {
-            imgs.forEach((img, i) => img.classList.toggle("activa", i === indice));
-            contador.textContent = `${indice + 1} / ${imgs.length}`;
-            if (caption) caption.textContent = items[indice].caption;
-            btnPrev.disabled = indice === 0;
-            btnNext.disabled = indice === imgs.length - 1;
-        }
-
-        btnPrev.addEventListener("click", () => {
-            if (indice > 0) { indice--; actualizar(); }
-        });
-        btnNext.addEventListener("click", () => {
-            if (indice < imgs.length - 1) { indice++; actualizar(); }
-        });
-        btnExpandir.addEventListener("click", () => abrirLightbox(items, indice));
-        imgs.forEach((img) => img.addEventListener("click", () => abrirLightbox(items, indice)));
-    });
-
-    document.querySelectorAll("[data-video-leccion]").forEach((link) => {
-        link.addEventListener("click", () => {
-            localStorage.setItem(claveVideoVisto(link.dataset.videoLeccion), "1");
-            const item = link.closest(".leccion-item");
-            const btnMarcar = item?.querySelector("[data-marcar-vista]");
-            if (btnMarcar) btnMarcar.disabled = false;
-            item?.querySelector(".aviso-ver-video")?.remove();
-        });
-    });
-
-    document.querySelectorAll("[data-marcar-vista]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            // Bloqueo sincrónico ANTES de cualquier await — sin esto, un
-            // doble click (o el mismo listener disparándose dos veces)
-            // podía leer "todavía no existe la asignación" en los dos
-            // casi al mismo tiempo y crear DOS filas en vez de
-            // actualizar una. Bug real encontrado en producción: varias
-            // filas de Asignaciones duplicadas con el mismo progreso.
-            if (btn.disabled) return;
-            btn.disabled = true;
-
-            const usuario = getUsuarioActual();
-            try {
-                const [todasLasLecciones, asignaciones] = await Promise.all([
-                    getLeccionesPorCurso(cursoId),
-                    getAsignacionesPorColaborador(usuario.id),
-                ]);
-                // Mismo filtro que el render (ver renderDetalleCurso) — una
-                // opcional nunca dispara este handler (no tiene botón), pero
-                // el TOTAL contra el que se calcula el % tiene que ser el
-                // mismo de los dos lados o el número final no coincide con
-                // lo que la persona ve en pantalla.
-                const lecciones = todasLasLecciones.filter((l) => l.obligatoria !== "NO");
-                let asignacion = asignaciones.find((a) => String(a.cursoId) === String(cursoId)) || null;
-
-                const idx = Number(btn.dataset.marcarVista);
-                const nuevasVistas = idx + 1;
-                const nuevoProgreso = Math.round((nuevasVistas / lecciones.length) * 100);
-                const nuevoEstado = nuevoProgreso >= 100 ? "completado" : "en_progreso";
-
-                if (asignacion) {
-                    await actualizarAsignacion(asignacion.id, { progreso: nuevoProgreso, estado: nuevoEstado });
-                } else {
-                    await crearAsignacion({ colaboradorId: usuario.id, cursoId, estado: nuevoEstado, progreso: nuevoProgreso });
-                }
-                registrarEvento(usuario.id, "avanzar_leccion", `${usuario.nombre} avanzó en el curso ${cursoId}`);
-
-                navigate(`cursos/${cursoId}`);
-            } catch (err) {
-                alert("No se pudo guardar el avance. Probá de nuevo.");
-                btn.disabled = false;
-            }
-        });
-    });
+    bindLeccionesInteractivas(document, cursoId);
 }
