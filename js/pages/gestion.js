@@ -48,7 +48,7 @@ import {
     eliminarTarea as eliminarTareaBackend,
 } from "../data/gestionTareas.js";
 import { getDiasPorSucursal, guardarDiasSucursal } from "../data/gestionTareasSucursal.js";
-import { getChecksPorSucursal, guardarCheckSucursal, reabrirTareaGestion, getHistoricoGestion, eliminarHistoricoGestion, getHorarioRecordatorioGestion, guardarHorarioRecordatorioGestion, limpiarMarcasFuturasGestion } from "../data/gestionChecks.js";
+import { getChecksPorSucursal, guardarCheckSucursal, reabrirTareaGestion, eliminarCheckGestion, getHistoricoGestion, eliminarHistoricoGestion, getHorarioRecordatorioGestion, guardarHorarioRecordatorioGestion } from "../data/gestionChecks.js";
 import { invalidar } from "../services/dataSource.js";
 import { HOJAS } from "../config.js";
 import { AutocompleteSucursal, bindAutocompleteSucursal } from "../components/autocompleteSucursal.js";
@@ -791,11 +791,22 @@ function tareaHtml(t, idUnico, dia) {
         <div class="tarea-gestion-push"${atrId}>${pushInteriorHtml}${exportarInteriorHtml}</div>
     ` : "";
 
+    // Candado rojo de Admin (2026-09-02, maqueta aprobada): "un
+    // candado en cada tarea para borrar los datos del sheet desde la
+    // app, en vez de entrar al sheet y borrar" — "Limpiar marcas
+    // futuras" no servía para esto porque solo toca días A FUTURO,
+    // nunca la tarea real del día. Visible en CUALQUIER tarea con
+    // algo marcado (completa o a medias), solo para Admin.
+    const puedeBorrarCheck = !!check && esAdminActual();
+    const btnBorrarCheck = puedeBorrarCheck
+        ? `<button type="button" class="btn-borrar-check-admin" data-borrar-check data-tarea-id="${t.id}" data-dia="${dia}" title="Borrar este registro (Admin)" aria-label="Borrar este registro">${Icon("tacho", { size: 15 })}</button>`
+        : "";
+
     if (t.subitems) {
         const marcados = check?.marcas || new Map();
         const firmas = check?.firmas || new Map();
         return `
-            <div class="tarea-gestion tarea-gestion-desplegable${check?.hecho ? " hecha" : ""}${bloqueada ? " bloqueada" : ""}" data-desplegable${atrId}>
+            <div class="tarea-gestion tarea-gestion-desplegable${check?.hecho ? " hecha" : ""}${bloqueada ? " bloqueada" : ""}${puedeBorrarCheck ? " con-borrar-admin" : ""}" data-desplegable${atrId}>
                 <button type="button" class="tarea-gestion-header" data-toggle-desplegable>
                     <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
                     <span class="tarea-gestion-txt">
@@ -807,6 +818,7 @@ function tareaHtml(t, idUnico, dia) {
                     ${badgeIncidenciasHtml(t.subitems, marcados)}
                     <span class="tarea-gestion-chevron">${Icon("flecha-der", { size: 16 })}</span>
                 </button>
+                ${btnBorrarCheck}
                 ${bannerCerradaHtml(check, t.id, dia, diaEquivocado)}
                 <div class="tarea-gestion-subitems" data-subitems>
                     ${t.subitems.map((s, is) => subitemFilaHtml(id, is, t.subitems, marcados, firmas, bloqueada)).join("")}
@@ -823,7 +835,7 @@ function tareaHtml(t, idUnico, dia) {
     }
 
     return `
-        <div class="tarea-gestion tarea-gestion-simple${check?.hecho ? " hecha" : ""}${bloqueada ? " bloqueada" : ""}"${atrId}>
+        <div class="tarea-gestion tarea-gestion-simple${check?.hecho ? " hecha" : ""}${bloqueada ? " bloqueada" : ""}${puedeBorrarCheck ? " con-borrar-admin" : ""}"${atrId}>
             <label class="tarea-gestion-label" for="${id}">
                 <input type="checkbox" id="${id}" class="tarea-gestion-check"${(esVistaLectura || bloqueada) ? " disabled" : ""}${check?.hecho ? " checked" : ""}>
                 <span class="tarea-gestion-ico">${Icon(t.icono, { size: 18 })}</span>
@@ -833,6 +845,7 @@ function tareaHtml(t, idUnico, dia) {
                     <span class="tarea-gestion-hora" data-hora>${hechoTexto}</span>
                 </span>
             </label>
+            ${btnBorrarCheck}
             ${bannerCerradaHtml(check, t.id, dia)}
             ${accionesTareaHtml()}
         </div>
@@ -1483,29 +1496,6 @@ function cuerpoGestionHtml() {
         </div>
     ` : "";
 
-    // "Limpiar marcas futuras" (2026-09-02) — pedido explícito: algunos
-    // Responsables marcaban un día posterior al de hoy "para probar",
-    // dejando marcas falsas. El día equivocado ya queda bloqueado para
-    // marcar de acá en más (ver esDiaDeHoyGestion en tareaHtml), pero
-    // esto es para LIMPIAR lo que ya quedó mal cargado antes del fix —
-    // borra, del ciclo VIGENTE nada más (no toca Histórico), lo marcado
-    // en un día posterior a hoy. Dos alcances, los dos pedidos
-    // explícitamente: un local puntual, o todos de una sola vez ("así
-    // todos tienen las tareas limpias para empezar la semana").
-    const cardLimpieza = esAdminActual() ? `
-        <div class="card-recordatorio-gestion">
-            <div class="card-recordatorio-header">
-                ${Icon("tacho", { size: 16 })}
-                <span>Limpiar marcas futuras</span>
-                <span class="badge-solo-admin">Solo Admin</span>
-            </div>
-            <p class="card-recordatorio-desc">Borra las marcas hechas en un día posterior al de hoy (semana o mes en curso) — para cuando alguien tildó por error un día que todavía no llega. No toca lo ya archivado en Histórico.</p>
-            <div class="card-recordatorio-control">
-                <button type="button" class="btn btn-secondary" id="btn-limpiar-futuras-local"${sucursalActiva ? "" : " disabled"} title="${sucursalActiva ? "" : "Elegí un local en el selector de arriba"}">Limpiar ${sucursalActiva ? `"${escaparHtml(sucursalActiva)}"` : "este local"}</button>
-                <button type="button" class="btn btn-secondary" id="btn-limpiar-futuras-todos">Limpiar todos los locales</button>
-            </div>
-        </div>
-    ` : "";
     const hayLocal = !esVistaLectura || !!sucursalActiva;
     // "Histórico" (2026-08-31) — Responsable de local siempre (va
     // directo a la suya); Admin/Supervisor solo después de elegir un
@@ -1601,7 +1591,6 @@ function cuerpoGestionHtml() {
         return `
             ${acciones}
             ${cardRecordatorio}
-            ${cardLimpieza}
             ${catalogoHtml}
         `;
     }
@@ -1695,7 +1684,6 @@ function cuerpoGestionHtml() {
     return `
         ${acciones}
         ${cardRecordatorio}
-        ${cardLimpieza}
 
         <div class="tabs-gestion" id="tabs-seccion-gestion">
             <button class="tab-gestion${vistaSeccion === "asignar" ? " activa" : ""}" data-vista-seccion="asignar">Asignar tareas</button>
@@ -3274,40 +3262,6 @@ function bindCuerpoGestion() {
         });
     }
 
-    // "Limpiar marcas futuras" (solo Admin, 2026-09-02) — dos botones,
-    // dos alcances pedidos explícitamente. Reusa manejarFalloGuardadoGestion
-    // (mismo aviso de "sin conexión" que el resto de Gestión) y
-    // refresca el cuerpo entero al terminar: puede haber destildado
-    // tareas que estaban a la vista.
-    const limpiarFuturas = (boton, sucursal, mensajeConfirm) => {
-        if (!confirm(mensajeConfirm)) return;
-        const textoOriginal = boton.textContent;
-        boton.disabled = true;
-        boton.textContent = "Limpiando...";
-        limpiarMarcasFuturasGestion(sucursal).then(async (r) => {
-            boton.disabled = false;
-            boton.textContent = textoOriginal;
-            if (!r?.ok) {
-                alert(r?.error || "No se pudo limpiar — probá de nuevo.");
-                return;
-            }
-            alert(r.borradas ? `Se limpiaron ${r.borradas} marca(s).` : "No había ninguna marca futura para limpiar.");
-            // Mismo mecanismo que elegirLocalGestion: puede haber
-            // destildado tareas que están a la vista ahora mismo.
-            if (r.borradas) {
-                await cargarDatos(sucursalActiva);
-                const cuerpo = document.getElementById("cuerpo-gestion");
-                if (cuerpo) { cuerpo.innerHTML = cuerpoGestionHtml(); bindCuerpoGestion(); }
-            }
-        }).catch((err) => manejarFalloGuardadoGestion(err, () => { boton.disabled = false; boton.textContent = textoOriginal; }));
-    };
-    document.getElementById("btn-limpiar-futuras-local")?.addEventListener("click", (e) => {
-        limpiarFuturas(e.currentTarget, sucursalActiva, `¿Limpiar las marcas futuras de "${sucursalActiva}"? No se puede deshacer.`);
-    });
-    document.getElementById("btn-limpiar-futuras-todos")?.addEventListener("click", (e) => {
-        limpiarFuturas(e.currentTarget, "", "¿Limpiar las marcas futuras de TODOS los locales? No se puede deshacer.");
-    });
-
     // "Reabrir tarea" (candado, solo Admin) — delegado en el mismo
     // contenedor estable que "Exportar a PDF" de abajo, mismo motivo:
     // el botón vive DENTRO de cada tarea (bannerCerradaHtml) y no
@@ -3327,6 +3281,29 @@ function bindCuerpoGestion() {
             }
             const clave = `${tareaId}|${dia}`;
             checksActivos[clave] = { ...checksActivos[clave], cerrada: false };
+            recrearTareaEnPaneles(tareaId);
+        }).catch((err) => manejarFalloGuardadoGestion(err, () => { btn.disabled = false; }));
+    });
+
+    // "Borrar registro" (candado rojo, solo Admin, 2026-09-02) — a
+    // diferencia de "Reabrir" (arriba), esto BORRA de verdad hora,
+    // quién la marcó y sus sub-ítems: la tarjeta vuelve a quedar sin
+    // tocar. Mismo contenedor delegado que Reabrir/Exportar, mismo
+    // motivo (el botón nace y muere con cada tarjeta).
+    document.getElementById("contenido-gestion-imprimible")?.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-borrar-check]");
+        if (!btn) return;
+        const { tareaId, dia } = btn.dataset;
+        const titulo = registroTareas.get(tareaId)?.titulo || "esta tarea";
+        if (!confirm(`¿Borrar el registro de "${titulo}" de este día? Se pierden la hora, quién lo marcó y sus sub-ítems — la tarea vuelve a quedar sin tocar. No se puede deshacer.`)) return;
+        btn.disabled = true;
+        eliminarCheckGestion(tareaId, dia, sucursalActiva).then((r) => {
+            if (!r?.ok) {
+                alert(r?.error || "No se pudo borrar — probá de nuevo.");
+                btn.disabled = false;
+                return;
+            }
+            delete checksActivos[`${tareaId}|${dia}`];
             recrearTareaEnPaneles(tareaId);
         }).catch((err) => manejarFalloGuardadoGestion(err, () => { btn.disabled = false; }));
     });
@@ -3472,6 +3449,21 @@ async function actualizarChecksEnDOM() {
         if (hora) hora.textContent = hechoTexto;
         tarjeta.classList.toggle("hecha", !!check?.hecho);
         tarjeta.classList.toggle("bloqueada", bloqueada);
+
+        // Candado rojo de Admin — aparece/desaparece según si ahora
+        // hay algo marcado, mismo criterio que tareaHtml (puedeBorrarCheck).
+        const puedeBorrarCheckAhora = !!check && esAdminActual();
+        tarjeta.classList.toggle("con-borrar-admin", puedeBorrarCheckAhora);
+        const btnBorrarExistente = tarjeta.querySelector("[data-borrar-check]");
+        if (puedeBorrarCheckAhora && !btnBorrarExistente) {
+            // afterend de un hijo DE ADENTRO de la tarjeta (header si es
+            // desplegable, el <label> si es simple) — nunca de la
+            // tarjeta misma, eso la insertaría FUERA como hermana.
+            const destino = tarjeta.querySelector("[data-toggle-desplegable], .tarea-gestion-label");
+            destino?.insertAdjacentHTML("afterend", `<button type="button" class="btn-borrar-check-admin" data-borrar-check data-tarea-id="${tareaId}" data-dia="${dia}" title="Borrar este registro (Admin)" aria-label="Borrar este registro">${Icon("tacho", { size: 15 })}</button>`);
+        } else if (!puedeBorrarCheckAhora && btnBorrarExistente) {
+            btnBorrarExistente.remove();
+        }
 
         const checkSimple = tarjeta.querySelector(".tarea-gestion-check");
         if (checkSimple) {

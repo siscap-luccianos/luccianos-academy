@@ -5406,8 +5406,35 @@ table.data-table tbody tr:hover{
     border-radius:var(--radius-sm);
     cursor:pointer;
     transition:var(--transition);
+    position:relative;
 }
 .tarea-gestion:hover{ border-color:var(--gold); }
+
+/* Candado/borrar de Admin (2026-09-02, maqueta aprobada) — esquina
+   superior derecha de CUALQUIER tarjeta con algo marcado (completa o a
+   medias), solo para Admin. Se reserva espacio a la derecha del
+   contenido (con-borrar-admin) para que no tape el chevron/progreso
+   de una desplegable ni el texto de una simple. */
+.btn-borrar-check-admin{
+    position:absolute;
+    top:12px;
+    right:12px;
+    width:30px;
+    height:30px;
+    border-radius:8px;
+    background:var(--danger-soft);
+    border:1px solid rgba(229,103,92,.4);
+    color:var(--danger);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    z-index:2;
+    transition:var(--transition);
+}
+.btn-borrar-check-admin:hover{ background:rgba(229,103,92,.22); }
+.tarea-gestion-simple.con-borrar-admin{ padding-right:54px; }
+.tarea-gestion-desplegable.con-borrar-admin .tarea-gestion-header{ padding-right:54px; }
 
 .tarea-gestion-check{
     flex-shrink:0;
