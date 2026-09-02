@@ -2501,8 +2501,30 @@ function bindPushWrap(wrap) {
             // Confirmación visible de que SÍ salió — antes quedaba
             // mudo en el caso de éxito, indistinguible de "no hizo
             // nada" (pedido explícito: "no se sabe si se envió").
-            wrap.innerHTML = `<button type="button" class="btn-enviar-push" disabled>✓ Enviado</button>`;
-            setTimeout(pintarBoton, 2000);
+            //
+            // "✓ Enviado" a secas no avisaba si ALGUIEN no lo recibió
+            // de verdad (token vencido, celular sin notificaciones
+            // activadas, etc.) — el backend siempre respondía ok:true
+            // aunque fallaran destinatarios puntuales. Pedido explícito
+            // (2026-09-02, caso real: un Responsable de turno no
+            // recibía los avisos y nadie se enteraba): mostrar cuántos
+            // de verdad lo recibieron, no solo que el botón "funcionó".
+            let mensajeEnvio, avisoParcial;
+            if (!r.destinatarios) {
+                mensajeEnvio = "Enviado — nadie activó push";
+                avisoParcial = true;
+            } else if (r.fallidos > 0) {
+                mensajeEnvio = `Enviado a ${r.enviados}/${r.destinatarios}`;
+                avisoParcial = true;
+            } else {
+                mensajeEnvio = "✓ Enviado";
+                avisoParcial = false;
+            }
+            wrap.innerHTML = `<button type="button" class="btn-enviar-push${avisoParcial ? " aviso-parcial" : ""}" disabled>${mensajeEnvio}</button>`;
+            // Un aviso parcial se queda más tiempo en pantalla — es
+            // justo el caso que antes pasaba desapercibido, dos
+            // segundos no alcanzan para notarlo.
+            setTimeout(pintarBoton, avisoParcial ? 4500 : 2000);
         } catch (err) {
             alert("No se pudo enviar el push — probá de nuevo.");
             pintarBoton();

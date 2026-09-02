@@ -6598,6 +6598,16 @@ span.calendario-gestion-dia{
 }
 .btn-enviar-push:hover{ background:var(--gold-deep); border-color:var(--gold-deep); }
 .btn-enviar-push:disabled{ opacity:.6; cursor:default; }
+/* Entrega parcial o nula (2026-09-02) — antes "✓ Enviado" se veía
+   igual sin importar si ALGUIEN se quedó sin recibirlo de verdad
+   (token vencido, notificaciones nunca activadas). Distinto del dorado
+   de éxito para que se note de un vistazo. */
+.btn-enviar-push.aviso-parcial{
+    background:var(--warning-soft);
+    border:1px solid var(--warning);
+    color:var(--warning);
+    opacity:1;
+}
 
 /* Banner de confirmación — pedido explícito: "sumar un banner enviar,
    así si presiono por error lo revierte". Reemplaza al botón adentro
