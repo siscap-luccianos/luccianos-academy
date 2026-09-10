@@ -37,7 +37,7 @@ import { getItem, setItem } from "../services/storage.js";
 import { gasRequest } from "../services/google.js";
 import { navigate } from "../router.js";
 import { actualizarContadorCampana, decrementarContadorCampana } from "../components/topbar.js";
-import { mandarPush } from "../services/push.js";
+import { mandarPush, soportaPush, estadoPermisoPush, activarPush } from "../services/push.js";
 import { getTokens } from "../data/tokens.js";
 
 // Categorías de noticia — texto libre, pero se recuerdan como pills
@@ -719,6 +719,37 @@ function bindSwipeNotif() {
     });
 }
 
+// Recordatorio de "activá las notificaciones" — News es justo el canal
+// que se pierde quien no tiene push activo (cursos nuevos, avisos,
+// recordatorios), así que el aviso vive acá y no en un banner genérico
+// de inicio. Máximo una vez por semana (se guarda la fecha acá, en
+// este dispositivo) para no ser invasivo — pedido explícito del
+// usuario. Reusa el mismo estado/flujo que ya vive en Mi Perfil
+// (soportaPush/estadoPermisoPush/activarPush, services/push.js): nada
+// nuevo que mantener en paralelo.
+const CLAVE_RECORDATORIO_PUSH = "recordatorio_push_news";
+const SEMANA_MS = 7 * 24 * 60 * 60 * 1000;
+
+function debeMostrarRecordatorioPush() {
+    if (!soportaPush() || estadoPermisoPush() === "granted") return false;
+    const ultimo = getItem(CLAVE_RECORDATORIO_PUSH, 0);
+    return Date.now() - ultimo >= SEMANA_MS;
+}
+
+function bloqueRecordatorioPush() {
+    return `
+        <div class="push-recordatorio" id="push-recordatorio">
+            ${Icon("campana", { size: 18 })}
+            <div>
+                <strong>Activá las notificaciones</strong>
+                <p>Así no te perdés ninguna News: cursos nuevos, avisos y recordatorios directo al celular.</p>
+                <button type="button" class="btn btn-primary" id="btn-activar-push-news" style="width:auto">Activar</button>
+            </div>
+            <button type="button" class="btn-cerrar" id="btn-cerrar-recordatorio-push" aria-label="Cerrar">${Icon("cerrar", { size: 14 })}</button>
+        </div>
+    `;
+}
+
 export async function News() {
 
     const usuario = getUsuarioActual();
@@ -759,6 +790,12 @@ export async function News() {
     const { fijadas: fijadasTodas, resto: restoTodas } = separarFijadas(items);
     const { fijadas: fijadasNoLeidas, resto: restoNoLeidas } = separarFijadas(noLeidas);
 
+    // Se define "mostrado" apenas se decide renderizarlo (no al cerrarlo
+    // ni al activar) — así el conteo de la semana arranca de este
+    // render sin importar si la persona lo cierra con la X.
+    const mostrarRecordatorioPush = debeMostrarRecordatorioPush();
+    if (mostrarRecordatorioPush) setItem(CLAVE_RECORDATORIO_PUSH, Date.now());
+
     const gruposTodas = agrupar(restoTodas);
     const gruposNoLeidas = agrupar(restoNoLeidas);
 
@@ -792,6 +829,8 @@ export async function News() {
             </span>
         </div>
 
+        ${mostrarRecordatorioPush ? bloqueRecordatorioPush() : ""}
+
         <div class="form-info-box" style="margin-top:14px">
             ${Icon("idea", { size: 16 })}
             <p>Deslizá una noticia hacia la derecha para marcarla leída, o hacia la izquierda para fijarla en tu lista personal${esAdmin ? " o eliminarla" : ""} — fijar no afecta lo que ven los demás.</p>
@@ -805,6 +844,28 @@ export async function News() {
 export function bindNews() {
 
     const usuario = getUsuarioActual();
+
+    document.getElementById("btn-cerrar-recordatorio-push")?.addEventListener("click", () => {
+        // Solo oculta ESTE render — el conteo de "una vez por semana"
+        // ya quedó guardado al armar la pantalla (arriba, en News()),
+        // así que cerrar acá no adelanta el próximo recordatorio.
+        document.getElementById("push-recordatorio")?.remove();
+    });
+
+    document.getElementById("btn-activar-push-news")?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = "Activando...";
+        const resultado = await activarPush(usuario);
+        if (resultado.ok) {
+            document.getElementById("push-recordatorio")?.remove();
+            return;
+        }
+        btn.disabled = false;
+        btn.textContent = "Activar";
+        if (resultado.motivo === "denegado") alert("No diste el permiso de notificaciones — podés activarlo más tarde desde la configuración del navegador.");
+        else alert("No se pudo activar. Probá de nuevo en un momento." + (resultado.detalle ? `\n\nDetalle: ${resultado.detalle}` : ""));
+    });
 
     // Tabs Todas / No leídas — mismo patrón simple que otros toggles
     // de la app (mostrar/ocultar paneles ya renderizados, sin re-pedir

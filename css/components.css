@@ -1660,6 +1660,60 @@
     line-height:1.45;
 }
 
+/* Recordatorio "activá las notificaciones" en News — mismo lenguaje
+   visual que .form-info-box (borde/fondo dorado) pero con botón de
+   acción y cierre propio, así que es una clase aparte. */
+.push-recordatorio{
+    position:relative;
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    margin-top:14px;
+    padding:12px 34px 12px 14px;
+    border:1px solid var(--gold);
+    background:var(--gold-soft);
+    border-radius:var(--radius-sm);
+}
+
+.push-recordatorio svg{
+    flex-shrink:0;
+    color:var(--gold-deep);
+    margin-top:1px;
+}
+
+.push-recordatorio strong{
+    display:block;
+    font-size:13px;
+    color:var(--text);
+}
+
+.push-recordatorio p{
+    margin:3px 0 0;
+    font-size:12.5px;
+    color:var(--text);
+    line-height:1.4;
+}
+
+.push-recordatorio .btn{
+    margin-top:8px;
+}
+
+.push-recordatorio .btn-cerrar{
+    position:absolute;
+    top:10px;
+    right:10px;
+    background:none;
+    border:none;
+    padding:2px;
+    cursor:pointer;
+    color:var(--muted);
+    display:flex;
+}
+
+.push-recordatorio .btn-cerrar:hover{
+    color:var(--text);
+}
+
 /* Pill de categoría con botón de borrar (×) — pedido del usuario:
    "dejá que borre las etiquetas ya cargadas por si lo deseo". El × vive
    dentro del pill, a la derecha del texto. */
