@@ -638,6 +638,20 @@ function _usuariosVisiblesPara(filas, usuarioActual) {
     });
 }
 
+/** Los ids de colaboradores del local de un Encargado, mismo criterio
+ *  que _usuariosVisiblesPara (que ya le deja ver la nómina de su
+ *  sucursal). */
+function _idsDeMiSucursal(usuarioActual) {
+    const miSucursal = String(usuarioActual.sucursal || "").trim().toLowerCase();
+    const ids = {};
+    _leerCrudo("Usuarios").forEach(function (u) {
+        if (String(u.sucursal || "").trim().toLowerCase() === miSucursal) {
+            ids[String(u.id)] = true;
+        }
+    });
+    return ids;
+}
+
 function leer(hoja, usuarioActual) {
     if (LECTURA_SOLO_GESTION.indexOf(hoja) !== -1 && !_esGestion(usuarioActual)) {
         return { ok: false, error: "No tenés permiso para leer " + hoja + "." };
@@ -647,7 +661,19 @@ function leer(hoja, usuarioActual) {
 
     // Un colaborador raso solo ve sus propias asignaciones/resultados;
     // gestión (admin/supervisor) ve todo (los dashboards lo necesitan).
+    //
+    // El Encargado es un caso aparte: no es gestión, pero su pantalla
+    // "Mi local" muestra el progreso de todo su equipo. Sin esta rama
+    // se comía el filtro de colaborador raso y veía a su gente con
+    // TODO en cero (0/7 módulos, 0/79 lecciones, "Sin rendir") — ceros
+    // que parecían reales, porque la lista de personas sí le llegaba
+    // (Usuarios ya contempla al encargado, ver _usuariosVisiblesPara)
+    // y lo único que faltaba eran estas dos hojas.
     if ((hoja === "Asignaciones" || hoja === "Resultados") && !_esGestion(usuarioActual)) {
+        if (usuarioActual.encargado) {
+            const idsDeMiLocal = _idsDeMiSucursal(usuarioActual);
+            return filas.filter((f) => idsDeMiLocal[String(f.colaboradorId)] === true);
+        }
         return filas.filter((f) => String(f.colaboradorId) === String(usuarioActual.id));
     }
 
@@ -2227,9 +2253,17 @@ function subirArchivo(nombreArchivo, extension, archivoBase64) {
         const archivo = carpetaMes.createFile(blob);
         archivo.setSharing(DriveApp.Access.ANYONE, DriveApp.Permission.VIEW);
 
+        // Si es una imagen, se guarda el link de thumbnail (sirve
+        // directo como src de <img>). Para el resto (PDF, video, etc.)
+        // se mantiene archivo.getUrl(), pensado para abrirse en una
+        // pestaña, no para embeberse.
+        const url = tipo === "Imagenes"
+            ? "https://drive.google.com/thumbnail?id=" + archivo.getId() + "&sz=w1000"
+            : archivo.getUrl();
+
         return {
             ok: true,
-            url: archivo.getUrl(),
+            url: url,
             archivoId: archivo.getId(),
             nombre: nombreArchivo
         };
