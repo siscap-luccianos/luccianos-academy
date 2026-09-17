@@ -105,7 +105,7 @@ export const PUSH_DISPONIBLE = !!FIREBASE_CONFIG.apiKey;
  *  saber de un vistazo qué versión corre en cada entorno y no
  *  confundir REPO con producción. Se sube a mano cada vez que se
  *  pushea un cambio — no hay build step que lo automatice. */
-export const VERSION = "3.37.0";
+export const VERSION = "3.37.1";
 
 export const EMPRESA = {
     nombre: "Lucciano's",
@@ -148,6 +148,12 @@ export const HOJAS = {
     // Check "hecho" persistido, por sucursal y por día — ver
     // apps-script/README.md.
     GESTION_CHECKS: "GestionChecks",
+    // Desafío diario (#/desafio) — una fila por cada vez que alguien
+    // juega, ver apps-script/README.md. El ranking del mes en curso se
+    // calcula sumando estas filas; DESAFIO_HISTORIAL guarda la foto
+    // congelada de un mes ya cerrado.
+    DESAFIO_RESULTADOS: "DesafioResultados",
+    DESAFIO_HISTORIAL: "DesafioHistorial",
 };
 
 /**
