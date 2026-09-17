@@ -1713,3 +1713,12 @@ function diagnosticoCompletarBusquets() {
 function setupCompletarBusquets() {
   setupCompletarTodoParaUsuario('Busquets');
 }
+
+/** "Busquets" matcheaba a DOS usuarios (el admin real y el
+ *  colaborador de prueba) — esta apunta directo al id del
+ *  colaborador de prueba, "Maximo Busquets ( Prueba )", que es el
+ *  que puede jugar el Desafío Diario (esa ruta es solo para rol
+ *  colaborador, el admin no entra ahí). */
+function setupCompletarMaximoBusquets() {
+  setupCompletarTodoParaUsuario('1785940890903');
+}
