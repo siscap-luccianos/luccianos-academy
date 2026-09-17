@@ -1789,3 +1789,26 @@ function setupNombreEnDesafio() {
     console.log('  → ' + completados + ' fila(s) de ' + nombreHoja + ' completadas con el nombre.');
   });
 }
+
+/**
+ * Atajo reutilizable para no tener que pedir una función nueva cada
+ * vez que se quiera completar todo a OTRA persona de prueba: editá
+ * el nombre de acá abajo (entre comillas) y corré siempre las mismas
+ * dos funciones, en este orden:
+ *   1. diagnosticoCompletarUsuarioConfigurado — solo lee, confirma
+ *      a quién matcheó antes de tocar nada.
+ *   2. setupCompletarUsuarioConfigurado — si el diagnóstico mostró
+ *      UN solo candidato correcto, completa todos los cursos para
+ *      esa persona (ver setupCompletarTodoParaUsuario más arriba).
+ * Si el diagnóstico muestra más de un candidato, cambiá el valor acá
+ * por el id exacto que te mostró (no el nombre) y corré de nuevo.
+ */
+var USUARIO_A_COMPLETAR = 'Nombre o id acá';
+
+function diagnosticoCompletarUsuarioConfigurado() {
+  diagnosticoCompletarUsuario(USUARIO_A_COMPLETAR);
+}
+
+function setupCompletarUsuarioConfigurado() {
+  setupCompletarTodoParaUsuario(USUARIO_A_COMPLETAR);
+}
