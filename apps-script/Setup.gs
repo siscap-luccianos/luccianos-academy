@@ -1697,3 +1697,19 @@ function setupCompletarTodoParaUsuario(nombreOId) {
   console.log('Asignaciones: ' + nuevasAsig + ' nuevas, ' + actualizadasAsig + ' actualizadas a 100%.');
   console.log('Resultados: ' + nuevosRes + ' nuevos aprobados, ' + yaAprobados + ' que ya estaban aprobados.');
 }
+
+/**
+ * El botón "Ejecutar" del editor de Apps Script no deja pasar
+ * parámetros — llama a la función sin argumentos, y con "Busquets"
+ * como parámetro de diagnosticoCompletarUsuario/
+ * setupCompletarTodoParaUsuario eso da "undefined". Estas dos son el
+ * mismo par de arriba con el nombre ya puesto adentro, para poder
+ * correrlas tal cual desde el botón.
+ */
+function diagnosticoCompletarBusquets() {
+  diagnosticoCompletarUsuario('Busquets');
+}
+
+function setupCompletarBusquets() {
+  setupCompletarTodoParaUsuario('Busquets');
+}
