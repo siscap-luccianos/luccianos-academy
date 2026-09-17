@@ -1643,28 +1643,12 @@ function diagnosticoCompletarUsuario(nombreOId) {
   console.log('Se completarían estos ' + cursos.length + ' cursos: ' + cursos.map((c) => c.nombre).join(', '));
 }
 
-function setupCompletarTodoParaUsuario(nombreOId) {
-  const usuarios = _leerCrudo('Usuarios');
-  const candidatos = usuarios.filter((u) =>
-    String(u.id) === String(nombreOId) ||
-    String(u.nombre || '').toLowerCase().indexOf(String(nombreOId).toLowerCase()) !== -1);
-
-  if (!candidatos.length) {
-    console.log('No se encontró ningún usuario que matchee "' + nombreOId + '"');
-    return;
-  }
-  if (candidatos.length > 1) {
-    console.log('Hay más de un usuario que matchea "' + nombreOId + '" — corré diagnosticoCompletarUsuario primero y pasá el id exacto acá.');
-    return;
-  }
-  const usuario = candidatos[0];
-  console.log('Completando TODOS los cursos para: id=' + usuario.id + ' · ' + usuario.nombre);
-
-  const cursos = _leerCrudo('Cursos');
-  const asignaciones = _leerCrudo('Asignaciones');
-  const resultados = _leerCrudo('Resultados');
-  const hoy = new Date().toISOString().slice(0, 10);
-
+/** Lógica compartida entre setupCompletarTodoParaUsuario (un solo
+ *  usuario) y setupCompletarTodoATodosLosColaboradores (todos de
+ *  una) — recibe los datos ya leídos para no releer las hojas por
+ *  cada persona cuando se procesan varias. Devuelve los contadores
+ *  en vez de imprimirlos, así cada llamador decide cómo mostrarlos. */
+function _completarCursosParaUsuario(usuario, cursos, asignaciones, resultados, hoy) {
   let nuevasAsig = 0, actualizadasAsig = 0, nuevosRes = 0, yaAprobados = 0;
 
   cursos.forEach((curso) => {
@@ -1692,10 +1676,85 @@ function setupCompletarTodoParaUsuario(nombreOId) {
     }
   });
 
+  return { nuevasAsig, actualizadasAsig, nuevosRes, yaAprobados };
+}
+
+function setupCompletarTodoParaUsuario(nombreOId) {
+  const usuarios = _leerCrudo('Usuarios');
+  const candidatos = usuarios.filter((u) =>
+    String(u.id) === String(nombreOId) ||
+    String(u.nombre || '').toLowerCase().indexOf(String(nombreOId).toLowerCase()) !== -1);
+
+  if (!candidatos.length) {
+    console.log('No se encontró ningún usuario que matchee "' + nombreOId + '"');
+    return;
+  }
+  if (candidatos.length > 1) {
+    console.log('Hay más de un usuario que matchea "' + nombreOId + '" — corré diagnosticoCompletarUsuario primero y pasá el id exacto acá.');
+    return;
+  }
+  const usuario = candidatos[0];
+  console.log('Completando TODOS los cursos para: id=' + usuario.id + ' · ' + usuario.nombre);
+
+  const cursos = _leerCrudo('Cursos');
+  const asignaciones = _leerCrudo('Asignaciones');
+  const resultados = _leerCrudo('Resultados');
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  const r = _completarCursosParaUsuario(usuario, cursos, asignaciones, resultados, hoy);
+
   console.log('');
   console.log('Listo — ' + usuario.nombre + ' quedó con los ' + cursos.length + ' cursos completados y aprobados.');
-  console.log('Asignaciones: ' + nuevasAsig + ' nuevas, ' + actualizadasAsig + ' actualizadas a 100%.');
-  console.log('Resultados: ' + nuevosRes + ' nuevos aprobados, ' + yaAprobados + ' que ya estaban aprobados.');
+  console.log('Asignaciones: ' + r.nuevasAsig + ' nuevas, ' + r.actualizadasAsig + ' actualizadas a 100%.');
+  console.log('Resultados: ' + r.nuevosRes + ' nuevos aprobados, ' + r.yaAprobados + ' que ya estaban aprobados.');
+}
+
+/**
+ * Solo para STAGING — completa TODOS los cursos (Asignación
+ * 100%/completado + Resultado aprobado) para CADA colaborador real
+ * de rol "colaborador" en la Sheet — no solo uno puntual. Pensada
+ * para poder probar el Ranking/Desafío Diario con varios
+ * participantes de una, sin ir persona por persona con
+ * setupCompletarTodoParaUsuario.
+ *
+ * Deja afuera a admin/supervisor a propósito (no juegan el Desafío
+ * Diario — ver services/auth.js, ruta "desafio" solo colaborador).
+ * Idempotente, igual que la versión de un solo usuario: correrla de
+ * nuevo no duplica nada.
+ *
+ * Con MUCHOS colaboradores esto puede tardar varios minutos (cada
+ * escritura relee la hoja entera) — si Apps Script corta la
+ * ejecución por tiempo, es seguro volver a correrla: sigue donde
+ * quedó, nunca repite lo que ya estaba completo.
+ */
+function setupCompletarTodoATodosLosColaboradores() {
+  const usuarios = _leerCrudo('Usuarios');
+  const colaboradores = usuarios.filter((u) => String(u.rol || '').trim().toLowerCase() === 'colaborador');
+
+  if (!colaboradores.length) {
+    console.log('No se encontró ningún usuario con rol "colaborador".');
+    return;
+  }
+
+  const cursos = _leerCrudo('Cursos');
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  console.log('Completando TODOS los cursos para ' + colaboradores.length + ' colaborador(es)...');
+  console.log('');
+
+  colaboradores.forEach((usuario, i) => {
+    // Se releen Asignaciones/Resultados en cada vuelta — recién
+    // escritas por la persona anterior, así _completarCursosParaUsuario
+    // ve el estado real y no duplica nada entre una persona y la
+    // siguiente.
+    const asignaciones = _leerCrudo('Asignaciones');
+    const resultados = _leerCrudo('Resultados');
+    const r = _completarCursosParaUsuario(usuario, cursos, asignaciones, resultados, hoy);
+    console.log((i + 1) + '/' + colaboradores.length + ' · ' + usuario.nombre + ' — asignaciones: ' + r.nuevasAsig + ' nuevas/' + r.actualizadasAsig + ' actualizadas · resultados: ' + r.nuevosRes + ' nuevos/' + r.yaAprobados + ' ya aprobados.');
+  });
+
+  console.log('');
+  console.log('Listo — ' + colaboradores.length + ' colaborador(es) con los ' + cursos.length + ' cursos completados y aprobados.');
 }
 
 /**
