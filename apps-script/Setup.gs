@@ -1722,3 +1722,22 @@ function setupCompletarBusquets() {
 function setupCompletarMaximoBusquets() {
   setupCompletarTodoParaUsuario('1785940890903');
 }
+
+/**
+ * Agrega la columna "excluidoDesafio" a Usuarios (Fase 3 del
+ * Desafío Diario — pages/ranking.js). Vacía por defecto para todos
+ * los usuarios existentes = participan normalmente. Idempotente:
+ * si la columna ya existe, no hace nada.
+ */
+function setupExcluidoDesafio() {
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Usuarios');
+  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+
+  if (headers.indexOf('excluidoDesafio') !== -1) {
+    console.log('La columna "excluidoDesafio" ya existe en Usuarios — no se hizo nada.');
+    return;
+  }
+
+  hoja.getRange(1, headers.length + 1).setValue('excluidoDesafio');
+  console.log('✓ Columna "excluidoDesafio" agregada a Usuarios (vacía = participa normalmente).');
+}
