@@ -1871,3 +1871,133 @@ function diagnosticoCompletarUsuarioConfigurado() {
 function setupCompletarUsuarioConfigurado() {
   setupCompletarTodoParaUsuario(USUARIO_A_COMPLETAR);
 }
+
+/**
+ * Alta del equipo de Lucciano's Parque Arauco Chile (13 personas).
+ *
+ * Mismo resultado que cargarlas una por una desde Colaboradores →
+ * "Nuevo colaborador": rol colaborador, acceso por 30 días desde hoy
+ * (igual a DIAS_ACCESO_INICIAL en pages/colaboradores.js), activo, y
+ * fechaAlta de hoy. La primera persona de la lista es Responsable de
+ * turno (responsableTurno = SI; NO es encargado: es solo una etiqueta,
+ * no abre permisos).
+ *
+ * Dos pasos, mismo patrón que previsualizarPaises()/completarPaises():
+ *   1. previsualizarColaboradoresParqueArauco() — solo LEE. Muestra a
+ *      quién daría de alta, a quién saltea por mail repetido y si el
+ *      local existe en la hoja Sucursales.
+ *   2. cargarColaboradoresParqueArauco() — escribe. Es idempotente:
+ *      correrla dos veces no duplica a nadie (saltea por mail).
+ * No hace falta re-implementar el Apps Script: se corre a mano.
+ */
+var COLABORADORES_PARQUE_ARAUCO = [
+  { nombre: 'Maria Fernanda Lopez',  email: 'mariaflt1008@gmail.com',       responsableTurno: true },
+  { nombre: 'Matias Delgado',        email: 'matiasnic2120@gmail.com' },
+  { nombre: 'Ethan Larenas',         email: 'e.larenaszuniga@gmail.com' },
+  { nombre: 'Fabiola Muñoz',         email: 'curinancomilen3@gmail.com' },
+  { nombre: 'Andrea Pirela',         email: 'andreapirela66@gmail.com' },
+  { nombre: 'Angelina Sosa',         email: 'angelinasosa.1505@gmail.com' },
+  { nombre: 'Vicente Rojas',         email: 'vicenterojas970@gmail.com' },
+  { nombre: 'Valentina Valenzuela',  email: 'valentina.pvluengo@gmail.com' },
+  { nombre: 'Millaray Gonzalez',     email: 'millaraygonzamora@gmail.com' },
+  { nombre: 'Matías Misle',          email: 'matimisle@gmail.com' },
+  { nombre: 'Fernanda Alcaide',      email: 'fernanda.alcaideq@gmail.com' },
+  { nombre: 'Adrian Garazatua',      email: 'garazatua.adrian@gmail.com' },
+  { nombre: 'Lisset Tropan',         email: 'lisset.anto10@gmail.com' }
+];
+
+var SUCURSAL_PARQUE_ARAUCO = "Lucciano's Parque Arauco Chile";
+
+function previsualizarColaboradoresParqueArauco() {
+  _colaboradoresParqueArauco(false);
+}
+
+function cargarColaboradoresParqueArauco() {
+  _colaboradoresParqueArauco(true);
+}
+
+function _colaboradoresParqueArauco(aplicar) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hoja = ss.getSheetByName('Usuarios');
+  if (!hoja) { console.log('No existe la hoja Usuarios.'); return; }
+
+  // El local tiene que existir TAL CUAL en Sucursales: Usuarios.sucursal
+  // enlaza por nombre exacto, y un nombre que no matchea deja al
+  // colaborador sin local (sin contenido por país, fuera de los
+  // reportes del local).
+  var hojaSuc = ss.getSheetByName('Sucursales');
+  if (hojaSuc) {
+    var filasSuc = hojaSuc.getDataRange().getValues();
+    var colNomSuc = filasSuc[0].indexOf('nombre');
+    var existeLocal = filasSuc.slice(1).some(function (f) {
+      return _normLocal(String(f[colNomSuc])) === _normLocal(SUCURSAL_PARQUE_ARAUCO);
+    });
+    if (!existeLocal) {
+      console.log('✗ No encuentro "' + SUCURSAL_PARQUE_ARAUCO + '" en la hoja Sucursales. No se cargó nada.');
+      return;
+    }
+    // Se usa el nombre tal como está escrito en la hoja.
+    for (var s = 1; s < filasSuc.length; s++) {
+      if (_normLocal(String(filasSuc[s][colNomSuc])) === _normLocal(SUCURSAL_PARQUE_ARAUCO)) {
+        SUCURSAL_PARQUE_ARAUCO = String(filasSuc[s][colNomSuc]);
+        break;
+      }
+    }
+  }
+
+  var datos = hoja.getDataRange().getValues();
+  var headers = datos[0].map(function (h) { return String(h).trim(); });
+  var colEmail = headers.indexOf('email');
+  if (colEmail === -1) { console.log('Falta la columna "email" en Usuarios.'); return; }
+
+  var existentes = {};
+  for (var i = 1; i < datos.length; i++) {
+    existentes[String(datos[i][colEmail]).trim().toLowerCase()] = true;
+  }
+
+  var hoy = new Date();
+  var hoyISO = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var vence = new Date(hoy.getTime() + 30 * 86400000);
+  var venceISO = Utilities.formatDate(vence, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  var altas = 0, saltadas = 0;
+  COLABORADORES_PARQUE_ARAUCO.forEach(function (p) {
+    var email = p.email.trim().toLowerCase();
+    if (existentes[email]) {
+      console.log('  = ya existe, se saltea: ' + p.nombre + ' <' + email + '>');
+      saltadas++;
+      return;
+    }
+
+    if (!aplicar) {
+      console.log('  + daría de alta: ' + p.nombre + ' <' + email + '>' + (p.responsableTurno ? '  [Responsable de turno]' : ''));
+      altas++;
+      return;
+    }
+
+    var fila = {
+      id: _proximoId(hoja),
+      nombre: p.nombre.trim(),
+      email: email,
+      rol: 'colaborador',
+      sucursal: SUCURSAL_PARQUE_ARAUCO,
+      encargado: 'NO',
+      responsableTurno: p.responsableTurno ? 'SI' : 'NO',
+      capacitador: 'NO',
+      activo: 'SI',
+      fechaVencimientoAcceso: venceISO,
+      fechaAlta: hoyISO,
+      fechaModificacion: new Date().toISOString()
+    };
+
+    var nuevaFila = hoja.getLastRow() + 1;
+    headers.forEach(function (h, j) {
+      if (fila[h] === undefined) return;
+      _escribirCeldaSinAdivinar(hoja.getRange(nuevaFila, j + 1), fila[h]);
+    });
+    console.log('  ✓ alta: ' + p.nombre + ' (id ' + fila.id + ')');
+    altas++;
+  });
+
+  console.log((aplicar ? 'Listo' : 'Previsualización') + ' — ' + altas + ' alta(s), ' + saltadas + ' saltada(s) por mail repetido. Local: ' + SUCURSAL_PARQUE_ARAUCO + (aplicar ? '. Acceso hasta ' + venceISO + '.' : '. No se modificó nada.'));
+}
