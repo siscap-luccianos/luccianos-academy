@@ -953,6 +953,8 @@ var PADRON_SUCURSALES = [
     // _normLocal ahora unifica los dos.
     { id: 123, nombre: "Lucciano's Oroño Santa Fe", propio: true },
     { id: 124, nombre: "Lucciano's Plaza Oeste Buenos Aires", propio: true },
+    // Local nuevo — se crea con cargarColaboradoresMataderos() (propio: false hasta confirmar).
+    { id: 125, nombre: "Lucciano's Mataderos CABA" },
 ];
 
 /**
@@ -1909,14 +1911,68 @@ var COLABORADORES_PARQUE_ARAUCO = [
 var SUCURSAL_PARQUE_ARAUCO = "Lucciano's Parque Arauco Chile";
 
 function previsualizarColaboradoresParqueArauco() {
-  _colaboradoresParqueArauco(false);
+  _altaEquipoLocal(SUCURSAL_PARQUE_ARAUCO, COLABORADORES_PARQUE_ARAUCO, false, false);
 }
 
 function cargarColaboradoresParqueArauco() {
-  _colaboradoresParqueArauco(true);
+  _altaEquipoLocal(SUCURSAL_PARQUE_ARAUCO, COLABORADORES_PARQUE_ARAUCO, true, false);
 }
 
-function _colaboradoresParqueArauco(aplicar) {
+/**
+ * Alta del equipo de Lucciano's Mataderos CABA (local NUEVO, 16 personas).
+ *
+ * Igual que Parque Arauco, con una diferencia: el local todavía no
+ * existe en la hoja Sucursales, así que esta SÍ lo crea (si falta) antes
+ * de dar de alta a la gente. Sin ese paso, Usuarios.sucursal quedaría
+ * apuntando a un local inexistente y nadie lo vería donde corresponde.
+ *
+ * El local se crea Activa y esPropio = NO (franquicia). Si es un local
+ * propio, cambialo a mano en la hoja o con Locales → Editar. Los roles
+ * son todos Colaborador (la planilla de papel no los indicaba): quien
+ * sea Responsable de turno/local se marca después en Colaboradores →
+ * Editar.
+ *
+ * Mismo uso: 1) previsualizarColaboradoresMataderos() solo lee;
+ * 2) cargarColaboradoresMataderos() escribe. Idempotente por mail.
+ */
+var SUCURSAL_MATADEROS = "Lucciano's Mataderos CABA";
+
+var COLABORADORES_MATADEROS = [
+  { nombre: 'Barbara Soraya Gonzalez',            email: 'gonzalezsoraya024@gmail.com' },
+  { nombre: 'Concepción Melany Guzman Mendoza',   email: 'melanyguzman1112@gmail.com' },
+  { nombre: 'Candela Bekerman',                   email: 'candelabekerman@gmail.com' },
+  { nombre: 'Matías Ares',                        email: 'aresmati5@gmail.com' },
+  { nombre: 'Alexandro Sumbay',                   email: 'marianoaguilarvilaelcazador@gmail.com' },
+  { nombre: 'Valentina Barrios',                  email: 'valenfbarrios@gmail.com' },
+  { nombre: 'Sofía Abraham',                      email: 'ffsoofiaabraham006@gmail.com' },
+  { nombre: 'Valeria Laspina',                    email: 'valerialaspina86@gmail.com' },
+  { nombre: 'Sol Perez',                          email: 'soleflowerperez28@gmail.com' },
+  { nombre: 'Celeste Diaz',                       email: 'diazcelesteok6@gmail.com' },
+  { nombre: 'Matías Garcia',                      email: 'matias6.420036@gmail.com' },
+  { nombre: 'Agustín Mercado',                    email: 'agustinmercado42@gmail.com' },
+  { nombre: 'Antonella Llamas',                   email: 'llamasantonella119@gmail.com' },
+  { nombre: 'Agostina Dafne Staropoli',           email: 'daf.staropoli@gmail.com' },
+  { nombre: 'Giuliana Celli',                     email: 'cellimaria033@gmail.com' },
+  { nombre: 'Wilson Gonzalez',                    email: 'wilson.boca.73@gmail.com' }
+];
+
+function previsualizarColaboradoresMataderos() {
+  _altaEquipoLocal(SUCURSAL_MATADEROS, COLABORADORES_MATADEROS, false, true);
+}
+
+function cargarColaboradoresMataderos() {
+  _altaEquipoLocal(SUCURSAL_MATADEROS, COLABORADORES_MATADEROS, true, true);
+}
+
+/**
+ * Motor común de las altas por local.
+ *   nombreLocal       — nombre del local tal como debe quedar en Sucursales.
+ *   personas          — [{ nombre, email, responsableTurno? }].
+ *   aplicar           — false = solo informa; true = escribe.
+ *   crearLocalSiFalta — true si el local puede no existir todavía.
+ * Acceso por 30 días desde hoy (DIAS_ACCESO_INICIAL en la app).
+ */
+function _altaEquipoLocal(nombreLocal, personas, aplicar, crearLocalSiFalta) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var hoja = ss.getSheetByName('Usuarios');
   if (!hoja) { console.log('No existe la hoja Usuarios.'); return; }
@@ -1925,23 +1981,25 @@ function _colaboradoresParqueArauco(aplicar) {
   // enlaza por nombre exacto, y un nombre que no matchea deja al
   // colaborador sin local (sin contenido por país, fuera de los
   // reportes del local).
+  var local = nombreLocal;
+  var crearLocal = false;
   var hojaSuc = ss.getSheetByName('Sucursales');
   if (hojaSuc) {
     var filasSuc = hojaSuc.getDataRange().getValues();
-    var colNomSuc = filasSuc[0].indexOf('nombre');
-    var existeLocal = filasSuc.slice(1).some(function (f) {
-      return _normLocal(String(f[colNomSuc])) === _normLocal(SUCURSAL_PARQUE_ARAUCO);
-    });
-    if (!existeLocal) {
-      console.log('✗ No encuentro "' + SUCURSAL_PARQUE_ARAUCO + '" en la hoja Sucursales. No se cargó nada.');
-      return;
-    }
-    // Se usa el nombre tal como está escrito en la hoja.
+    var encSuc = filasSuc[0];
+    var colNomSuc = encSuc.indexOf('nombre');
+    var encontrado = null;
     for (var s = 1; s < filasSuc.length; s++) {
-      if (_normLocal(String(filasSuc[s][colNomSuc])) === _normLocal(SUCURSAL_PARQUE_ARAUCO)) {
-        SUCURSAL_PARQUE_ARAUCO = String(filasSuc[s][colNomSuc]);
-        break;
-      }
+      if (_normLocal(String(filasSuc[s][colNomSuc])) === _normLocal(nombreLocal)) { encontrado = String(filasSuc[s][colNomSuc]); break; }
+    }
+    if (encontrado) {
+      local = encontrado; // el nombre exacto como está en la hoja
+    } else if (crearLocalSiFalta) {
+      crearLocal = true;
+      console.log(aplicar ? '+ El local no existe: se crea "' + nombreLocal + '".' : '+ El local "' + nombreLocal + '" NO existe todavía: se crearía al cargar.');
+    } else {
+      console.log('✗ No encuentro "' + nombreLocal + '" en la hoja Sucursales. No se cargó nada.');
+      return;
     }
   }
 
@@ -1957,17 +2015,34 @@ function _colaboradoresParqueArauco(aplicar) {
 
   var hoy = new Date();
   var hoyISO = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var vence = new Date(hoy.getTime() + 30 * 86400000);
-  var venceISO = Utilities.formatDate(vence, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var venceISO = Utilities.formatDate(new Date(hoy.getTime() + 30 * 86400000), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  if (aplicar && crearLocal) {
+    var enc = hojaSuc.getRange(1, 1, 1, hojaSuc.getLastColumn()).getValues()[0];
+    var cId = enc.indexOf('id'), cNom = enc.indexOf('nombre'), cEst = enc.indexOf('estado'),
+        cPro = enc.indexOf('esPropio'), cPais = enc.indexOf('pais');
+    var maxId = 0;
+    for (var k = 1; k < filasSuc.length; k++) { var v = Number(filasSuc[k][cId]); if (isFinite(v) && v > maxId) maxId = Math.round(v); }
+    var filaSuc = [];
+    for (var c = 0; c < enc.length; c++) filaSuc.push('');
+    if (cId !== -1) filaSuc[cId] = maxId + 1;
+    filaSuc[cNom] = nombreLocal;
+    if (cEst !== -1) filaSuc[cEst] = 'Activa';
+    if (cPro !== -1) filaSuc[cPro] = 'NO';
+    if (cPais !== -1) filaSuc[cPais] = _paisDelNombre(nombreLocal);
+    hojaSuc.getRange(hojaSuc.getLastRow() + 1, 1, 1, enc.length).setValues([filaSuc]);
+    console.log('  ✓ Local creado: ' + nombreLocal + ' (id ' + (maxId + 1) + ', Activa, esPropio=NO)');
+  }
 
   var altas = 0, saltadas = 0;
-  COLABORADORES_PARQUE_ARAUCO.forEach(function (p) {
+  personas.forEach(function (p) {
     var email = p.email.trim().toLowerCase();
     if (existentes[email]) {
       console.log('  = ya existe, se saltea: ' + p.nombre + ' <' + email + '>');
       saltadas++;
       return;
     }
+    existentes[email] = true; // dos filas con el mismo mail en la lista tampoco se duplican
 
     if (!aplicar) {
       console.log('  + daría de alta: ' + p.nombre + ' <' + email + '>' + (p.responsableTurno ? '  [Responsable de turno]' : ''));
@@ -1980,7 +2055,7 @@ function _colaboradoresParqueArauco(aplicar) {
       nombre: p.nombre.trim(),
       email: email,
       rol: 'colaborador',
-      sucursal: SUCURSAL_PARQUE_ARAUCO,
+      sucursal: local,
       encargado: 'NO',
       responsableTurno: p.responsableTurno ? 'SI' : 'NO',
       capacitador: 'NO',
@@ -1999,5 +2074,5 @@ function _colaboradoresParqueArauco(aplicar) {
     altas++;
   });
 
-  console.log((aplicar ? 'Listo' : 'Previsualización') + ' — ' + altas + ' alta(s), ' + saltadas + ' saltada(s) por mail repetido. Local: ' + SUCURSAL_PARQUE_ARAUCO + (aplicar ? '. Acceso hasta ' + venceISO + '.' : '. No se modificó nada.'));
+  console.log((aplicar ? 'Listo' : 'Previsualización') + ' — ' + altas + ' alta(s), ' + saltadas + ' saltada(s) por mail repetido. Local: ' + local + (aplicar ? '. Acceso hasta ' + venceISO + '.' : '. No se modificó nada.'));
 }
