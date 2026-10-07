@@ -954,7 +954,7 @@ var PADRON_SUCURSALES = [
     { id: 123, nombre: "Lucciano's Oroño Santa Fe", propio: true },
     { id: 124, nombre: "Lucciano's Plaza Oeste Buenos Aires", propio: true },
     // Local nuevo — se crea con cargarColaboradoresMataderos() (propio: false hasta confirmar).
-    { id: 125, nombre: "Lucciano's Mataderos CABA" },
+    { id: 125, nombre: "Lucciano's Mataderos" },
 ];
 
 /**
@@ -1919,7 +1919,7 @@ function cargarColaboradoresParqueArauco() {
 }
 
 /**
- * Alta del equipo de Lucciano's Mataderos CABA (local NUEVO, 16 personas).
+ * Alta del equipo de Lucciano's Mataderos (local NUEVO, 16 personas).
  *
  * Igual que Parque Arauco, con una diferencia: el local todavía no
  * existe en la hoja Sucursales, así que esta SÍ lo crea (si falta) antes
@@ -1935,7 +1935,7 @@ function cargarColaboradoresParqueArauco() {
  * Mismo uso: 1) previsualizarColaboradoresMataderos() solo lee;
  * 2) cargarColaboradoresMataderos() escribe. Idempotente por mail.
  */
-var SUCURSAL_MATADEROS = "Lucciano's Mataderos CABA";
+var SUCURSAL_MATADEROS = "Lucciano's Mataderos";
 
 var COLABORADORES_MATADEROS = [
   { nombre: 'Barbara Soraya Gonzalez',            email: 'gonzalezsoraya024@gmail.com' },
