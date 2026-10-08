@@ -28,7 +28,7 @@ import { EmptyState } from "../components/emptyState.js";
 import { Icon } from "../components/icons.js";
 import { MaestroBurbuja } from "../components/maestro.js";
 import { getCursos } from "../data/cursos.js";
-import { getPreguntasPorCurso } from "../data/evaluaciones.js";
+import { getPreguntasPorCurso, preguntasQueLeAplican } from "../data/evaluaciones.js";
 import { crearResultado } from "../data/resultados.js";
 import { registrarEvento } from "../data/auditoria.js";
 import { getUsuarioActual } from "../services/auth.js";
@@ -85,10 +85,13 @@ export async function Examen(params = []) {
     resetearEstado();
 
     const cursoId = params && params[0];
-    const [cursos, todasLasPreguntas] = await Promise.all([
+    const [cursos, bancoCompleto] = await Promise.all([
         getCursos(),
         getPreguntasPorCurso(cursoId),
     ]);
+    // Solo las preguntas que le corresponden a SU país/local: no tiene
+    // sentido evaluar sobre un producto o lección que no tiene.
+    const todasLasPreguntas = preguntasQueLeAplican(bancoCompleto, getUsuarioActual());
 
     const curso = cursos.find((c) => String(c.id) === String(cursoId));
     if (!curso) {

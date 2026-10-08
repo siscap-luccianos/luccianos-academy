@@ -237,7 +237,9 @@ function setupAplicaA() {
 
     // Disponibilidad va en la misma lista: guarda el alcance de cada
     // producto del catálogo con los mismos dos campos.
-    ['Cursos', 'Lecciones', 'Disponibilidad'].forEach(function (nombreHoja) {
+    // Evaluaciones también: cada pregunta puede no aplicar a un país o
+    // local (ej. una pregunta sobre Cannoli no se le hace a Chile).
+    ['Cursos', 'Lecciones', 'Disponibilidad', 'Evaluaciones'].forEach(function (nombreHoja) {
         var hoja = ss.getSheetByName(nombreHoja);
         if (!hoja) { console.log('Hoja no encontrada: ' + nombreHoja); return; }
 
