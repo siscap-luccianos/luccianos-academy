@@ -2078,3 +2078,73 @@ function _altaEquipoLocal(nombreLocal, personas, aplicar, crearLocalSiFalta) {
 
   console.log((aplicar ? 'Listo' : 'Previsualización') + ' — ' + altas + ' alta(s), ' + saltadas + ' saltada(s) por mail repetido. Local: ' + local + (aplicar ? '. Acceso hasta ' + venceISO + '.' : '. No se modificó nada.'));
 }
+
+/**
+ * Tarea de Gestión de tareas: "Control de vencimientos — Chocolatería".
+ *
+ * Crea UNA fila en el catálogo (hoja GestionTareas), igual que si la
+ * cargaras desde Gestión de tareas → Asignar tareas → nueva tarea: 7
+ * sub-ítems (una por línea de producto) de tipo "3 estados" (✓ en fecha,
+ * ! por vencer, ✕ vencido). Cada local después elige en qué día la hace
+ * (se recomienda el martes) — eso NO se toca acá.
+ *
+ * Alcance: se deja VACÍO (le aplica a todos). Para sacarla de un país o
+ * local, editá la tarea desde la app → "No aplica a".
+ *
+ * Dos pasos, mismo patrón que las otras:
+ *   1. previsualizarTareaVencimientosChocolateria() — solo LEE.
+ *   2. cargarTareaVencimientosChocolateria() — escribe. Idempotente:
+ *      si ya existe una tarea con ese título, no crea otra.
+ */
+var TITULO_TAREA_VENCIMIENTOS = 'Control de vencimientos — Chocolatería';
+
+function previsualizarTareaVencimientosChocolateria() {
+  _tareaVencimientosChocolateria(false);
+}
+
+function cargarTareaVencimientosChocolateria() {
+  _tareaVencimientosChocolateria(true);
+}
+
+function _tareaVencimientosChocolateria(aplicar) {
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('GestionTareas');
+  if (!hoja) { console.log('No existe la hoja GestionTareas.'); return; }
+
+  var datos = hoja.getDataRange().getValues();
+  var headers = datos[0].map(function (h) { return String(h).trim(); });
+  var colTitulo = headers.indexOf('titulo');
+  if (colTitulo === -1) { console.log('Falta la columna "titulo" en GestionTareas.'); return; }
+
+  for (var i = 1; i < datos.length; i++) {
+    if (String(datos[i][colTitulo]).trim() === TITULO_TAREA_VENCIMIENTOS) {
+      console.log('= Ya existe "' + TITULO_TAREA_VENCIMIENTOS + '" (fila ' + (i + 1) + '). No se creó otra.');
+      return;
+    }
+  }
+
+  var lineas = ['Alfajores', 'Conitos', 'Viennesi', 'Avella', 'Tabletas', 'Latas', 'Squares'];
+  var subitems = lineas.map(function (n) { return n + '::estado3'; }).join(',');
+
+  var fila = {
+    icono: 'calendario',
+    titulo: TITULO_TAREA_VENCIMIENTOS,
+    detalle: 'Revisá la fecha de vencimiento de cada línea. ✓ si está todo en fecha · ! si hay producto por vencer · ✕ si hay producto vencido.',
+    dias: '',
+    subitems: subitems,
+    fechaModificacion: Date.now(),
+    aplicaA: '',
+    noAplicaA: '',
+    recordatorioHabilitado: 'SI',
+    recordatorioHora: ''
+  };
+
+  if (!aplicar) {
+    console.log('+ Crearía la tarea "' + fila.titulo + '" con ' + lineas.length + ' sub-ítems: ' + lineas.join(', '));
+    console.log('  Tipo de cada uno: 3 estados · Alcance: todos · Recordatorio: SI');
+    console.log('— Previsualización. No se modificó nada. —');
+    return;
+  }
+
+  var r = _escribirCrudo('GestionTareas', fila);
+  console.log('✓ Tarea creada (id ' + r.id + '). Ya aparece en Gestión de tareas → Asignar tareas.');
+}
