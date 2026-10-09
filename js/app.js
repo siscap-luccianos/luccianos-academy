@@ -11,6 +11,7 @@ import { bindAvatarFallback } from "./components/avatar.js";
 import { iniciarChequeoDeVersion } from "./services/actualizacion.js";
 import { haySesion, getUsuarioActual } from "./services/auth.js";
 import { revalidarPushSiYaEstaConcedido } from "./services/push.js";
+import { aplicarApariencia } from "./services/apariencia.js";
 import "./services/google.js"; // Cargar antes de syncManager
 import "./services/indexeddb.js";
 import "./services/syncManager.js";
@@ -54,6 +55,10 @@ async function initApp() {
         window.syncManager.init().catch((err) => {
             console.warn('[APP] Sync en segundo plano falló:', err);
         });
+
+        // Antes del router: así la primera pantalla ya sale con la apariencia
+        // elegida y no parpadea de clásico a Liquid Glass.
+        aplicarApariencia();
 
         console.log('[APP] Initializing Router...');
         initRouter();

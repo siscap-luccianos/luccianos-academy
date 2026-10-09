@@ -64,8 +64,8 @@ function filaArchivoHtml(a = { url: "", label: "" }) {
         <div class="fs-archivo">
             <span class="fs-archivo-ico">${Icon("documento", { size: 18 })}</span>
             <div class="fs-archivo-campos">
-                <input type="text" class="input-archivo-label" placeholder="Nombre del botón — ej. PDF para imprimir" value="${escaparHtml(a.label || "")}" aria-label="Nombre del botón">
-                <input type="text" class="input-archivo-url" placeholder="https://drive.google.com/..." value="${escaparHtml(a.url || "")}" aria-label="Link del archivo">
+                <input type="text" class="input-archivo-label fs-in-label" placeholder="Nombre del botón — ej. PDF para imprimir" value="${escaparHtml(a.label || "")}" aria-label="Nombre del botón">
+                <input type="text" class="input-archivo-url fs-in-url" placeholder="https://drive.google.com/..." value="${escaparHtml(a.url || "")}" aria-label="Link del archivo">
             </div>
             <button type="button" class="fs-x btn-eliminar-archivo-manual" aria-label="Quitar archivo">×</button>
         </div>
@@ -154,7 +154,7 @@ function camposManualHtml(m = {}, sucursales = [], categoriasUsadas = []) {
             <div class="fs-pills" id="pills-roles-manual">${pillsRoles}</div>
 
             <label style="margin-top:16px">Alcance</label>
-            <div class="fs-seg" id="seg-alcance-manual">
+            <div class="fs-seg fs-seg-apilar" id="seg-alcance-manual">
                 ${ALCANCES_MANUAL.map((a) => `<button type="button" class="fs-seg-btn${alcanceInicial === a.valor ? " activa" : ""}" data-alcance="${a.valor}">${a.etiqueta}</button>`).join("")}
             </div>
 
@@ -162,7 +162,7 @@ function camposManualHtml(m = {}, sucursales = [], categoriasUsadas = []) {
                 <div class="fs-pills" id="pills-paises-manual">
                     ${paisesDisponibles.map((p) => `<button type="button" class="fs-pill${paisesElegidos.includes(p) ? " activa" : ""}" data-pill-pais="${escaparHtml(p)}">${escaparHtml(p)}</button>`).join("")}
                 </div>
-                <div class="fs-seg fs-seg-tipo" id="pills-tipo-manual">
+                <div class="fs-seg fs-seg-tipo fs-seg-apilar" id="pills-tipo-manual">
                     ${TIPOS_LOCAL_MANUAL.map((t) => `<button type="button" class="fs-seg-btn${tipoLocalActual === t.valor ? " activa" : ""}" data-pill-tipo-local="${t.valor}">${t.etiqueta}</button>`).join("")}
                 </div>
                 <p class="fs-ayuda">Sin ningún país tildado no se acota por país.</p>

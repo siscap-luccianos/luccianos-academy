@@ -22,6 +22,7 @@ import { setItem } from "../services/storage.js";
 import { VERSION, ES_STAGING } from "../config.js";
 import { seccionesDisponibles, TABS_POR_ROL } from "../components/bottomNav.js";
 import { getAccesosRapidos, setAccesosRapidos } from "../services/preferenciasAccesos.js";
+import { APARIENCIAS, getApariencia, setApariencia } from "../services/apariencia.js";
 
 const MAX_ACCESOS_RAPIDOS = 4;
 
@@ -197,6 +198,23 @@ function bloqueAccesosRapidos(usuario) {
     `;
 }
 
+/** Clásico / Liquid Glass — solo en el celular (ver .apariencia-solo-celular
+ *  en responsive.css), donde es lo único que cambia. */
+function bloqueApariencia() {
+    const actual = getApariencia();
+    return `
+        <div class="card apariencia-solo-celular" style="max-width:420px;margin-top:20px">
+            <h3 style="margin-top:0">Apariencia</h3>
+            <p class="text-xs text-muted" style="margin-top:4px;margin-bottom:14px">
+                Liquid Glass pone la barra de abajo flotante y las pantallas en vidrio. Se guarda en este celular.
+            </p>
+            <div class="fs-seg" id="seg-apariencia">
+                ${APARIENCIAS.map((a) => `<button type="button" class="fs-seg-btn${actual === a.id ? " activa" : ""}" data-apariencia="${a.id}">${a.etiqueta}</button>`).join("")}
+            </div>
+        </div>
+    `;
+}
+
 export async function Perfil() {
 
     const usuario = getUsuarioActual();
@@ -229,6 +247,8 @@ export async function Perfil() {
         </div>
 
         ${await bloquePush(usuario)}
+
+        ${bloqueApariencia()}
 
         ${bloqueAccesosRapidos(usuario)}
 
@@ -265,6 +285,13 @@ export function bindPerfil() {
         }
         setAccesosRapidos(getUsuarioActual(), elegidos);
         alert("Listo — se actualiza la próxima vez que navegues.");
+    });
+
+    document.querySelectorAll("#seg-apariencia [data-apariencia]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            setApariencia(btn.dataset.apariencia);
+            document.querySelectorAll("#seg-apariencia [data-apariencia]").forEach((b) => b.classList.toggle("activa", b === btn));
+        });
     });
 
     document.querySelectorAll("[data-ver-como-rol]").forEach((btn) => {

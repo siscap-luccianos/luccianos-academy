@@ -7803,16 +7803,19 @@ span.calendario-gestion-dia{
     flex:none;
 }
 .fs-archivo-campos{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.modal-body .fs-archivo .fs-archivo-campos input.input-archivo-label,
-.modal-body .fs-archivo .fs-archivo-campos input.input-archivo-url{
+.fs-archivo .fs-archivo-campos input.fs-in-label,
+.fs-archivo .fs-archivo-campos input.fs-in-url{
+    width:100%;
     background:transparent;
     border:0;
     border-radius:0;
     padding:3px 0;
+    color:var(--text);
+    font-family:inherit;
 }
-.modal-body .fs-archivo .fs-archivo-campos input.input-archivo-label{ font-size:14px; }
-.modal-body .fs-archivo .fs-archivo-campos input.input-archivo-url{ font-size:12px; color:var(--muted); }
-.modal-body .fs-archivo .fs-archivo-campos input:focus{
+.fs-archivo .fs-archivo-campos input.fs-in-label{ font-size:14px; }
+.fs-archivo .fs-archivo-campos input.fs-in-url{ font-size:12px; color:var(--muted); }
+.fs-archivo .fs-archivo-campos input:focus{
     outline:none;
     box-shadow:0 1px 0 0 var(--info);
 }
@@ -7877,5 +7880,51 @@ span.calendario-gestion-dia{
 
 @media (max-width:600px){
     .fs-fila-2{ grid-template-columns:1fr; }
-    .fs-seg{ flex-direction:column; }
+    .fs-seg-apilar{ flex-direction:column; }
 }
+
+
+/* Opciones de "A quién le llega" (News) como pastillas: una sola elegida,
+   el radio queda oculto pero accesible por teclado. */
+.radio-pills{ display:flex; flex-wrap:wrap; gap:8px; }
+.radio-pill{ position:relative; display:inline-flex; margin:0 !important; cursor:pointer; }
+.radio-pill input{ position:absolute; opacity:0; pointer-events:none; width:1px; height:1px; }
+.radio-pill span{
+    display:block;
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    border-radius:999px;
+    padding:7px 14px;
+    font-size:13px;
+    transition:var(--transition);
+}
+.radio-pill:hover span{ border-color:rgba(111,163,216,.5); color:var(--text); }
+.radio-pill input:checked + span{
+    background:var(--info-soft);
+    border-color:rgba(111,163,216,.5);
+    color:var(--info);
+}
+.radio-pill input:focus-visible + span{ outline:2px solid var(--info); outline-offset:2px; }
+
+/* Las pastillas de país y categoría de los formularios en secciones (News)
+   usan el azul suave en vez del dorado de las galerías de productos. */
+.form-secciones .pill-categoria{
+    background:transparent;
+    color:var(--muted);
+    font-weight:500;
+}
+.form-secciones .pill-categoria:hover{ border-color:rgba(111,163,216,.5); color:var(--text); }
+.form-secciones .pill-categoria.activa{
+    background:var(--info-soft);
+    border-color:rgba(111,163,216,.5);
+    color:var(--info);
+}
+
+/* El botón principal de las pantallas de redactar (News, Comunicaciones,
+   Recursos) en el mismo azul suave que el resto del formulario. */
+.compose-footer .btn-primary{
+    background:var(--info);
+    color:#0b1520;
+}
+.compose-footer .btn-primary:hover{ background:#8bb7e6; }
