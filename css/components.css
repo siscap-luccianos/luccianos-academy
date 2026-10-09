@@ -8277,3 +8277,38 @@ button.calendario-gestion-dia.con-tareas::after{ background:var(--info); }
 @media (prefers-reduced-motion: reduce){
     .aviso-deslizar::after{ animation:none; }
 }
+
+/* Desafío diario en Inicio: violeta un poco más intenso y un destello
+   sutil que lo cruza (mismo recurso que el aviso de News). El destello va
+   en background-position de un ::after con su propio radio, así no hace
+   falta overflow:hidden en la tarjeta (que recortaría el chip de arriba). */
+.tarjeta-desafio:not(.jugado){
+    background:linear-gradient(160deg, rgba(124,92,224,.30), var(--card) 85%);
+    border-color:#8b6cf0;
+    box-shadow:0 0 22px -5px rgba(124,92,224,.6);
+    animation-name:pulso-tarjeta-desafio-intenso;
+}
+@keyframes pulso-tarjeta-desafio-intenso{
+    0%, 100% { box-shadow:0 0 18px -6px rgba(124,92,224,.5); }
+    50% { box-shadow:0 0 32px -3px rgba(124,92,224,.9); }
+}
+.tarjeta-desafio:not(.jugado)::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:inherit;
+    pointer-events:none;
+    background:linear-gradient(110deg, transparent 42%, rgba(255,255,255,.16) 50%, transparent 58%);
+    background-size:250% 100%;
+    background-position:150% 0;
+    animation:destello-desafio 7s ease-in-out infinite;
+}
+.tarjeta-desafio:not(.jugado):hover::after,
+.tarjeta-desafio:not(.jugado):active::after{ animation-duration:1.8s; }
+@keyframes destello-desafio{
+    0%, 65% { background-position:150% 0; }
+    100% { background-position:-150% 0; }
+}
+@media (prefers-reduced-motion: reduce){
+    .tarjeta-desafio:not(.jugado)::after{ animation:none; }
+}
