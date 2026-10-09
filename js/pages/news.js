@@ -810,7 +810,7 @@ export async function News() {
 
         ${mostrarRecordatorioPush ? bloqueRecordatorioPush() : ""}
 
-        <div class="form-info-box" style="margin-top:14px">
+        <div class="form-info-box aviso-deslizar" style="margin-top:14px">
             ${Icon("idea", { size: 16 })}
             <p>Deslizá una noticia hacia la derecha para marcarla leída, o hacia la izquierda para fijarla en tu lista personal${esAdmin ? " o eliminarla" : ""} — fijar no afecta lo que ven los demás.</p>
         </div>

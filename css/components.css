@@ -8241,3 +8241,39 @@ button.calendario-gestion-dia.con-tareas::after{ background:var(--info); }
     border-color:rgba(111,163,216,.4);
 }
 .form-info-box svg{ color:var(--info); }
+
+
+/* Aviso "Deslizá una noticia…" (News) — el mismo violeta del Desafío diario
+   (#7c5ce0): degradé suave hacia la tarjeta, borde y resplandor violeta,
+   y un destello que lo cruza de vez en cuando (más rápido al pasar el
+   dedo o el mouse). Pedido explícito: "que quede difuminado, que al pasar
+   brille". */
+.form-info-box.aviso-deslizar{
+    position:relative;
+    overflow:hidden;
+    background:linear-gradient(160deg, rgba(124,92,224,.20), rgba(26,24,21,.85));
+    border:1.5px solid rgba(124,92,224,.7);
+    box-shadow:0 0 18px -6px rgba(124,92,224,.5);
+}
+.aviso-deslizar svg{ color:#a78bfa; }
+.aviso-deslizar::after{
+    content:"";
+    position:absolute;
+    top:0;
+    bottom:0;
+    left:0;
+    width:60%;
+    background:linear-gradient(110deg, transparent 20%, rgba(255,255,255,.20) 50%, transparent 80%);
+    transform:translateX(-130%);
+    animation:destello-aviso 7s ease-in-out infinite;
+    pointer-events:none;
+}
+.aviso-deslizar:hover::after,
+.aviso-deslizar:active::after{ animation-duration:1.6s; }
+@keyframes destello-aviso{
+    0%, 70% { transform:translateX(-130%); }
+    100% { transform:translateX(260%); }
+}
+@media (prefers-reduced-motion: reduce){
+    .aviso-deslizar::after{ animation:none; }
+}
