@@ -794,6 +794,7 @@ export async function News() {
         : `<p class="text-sm text-muted" style="padding:24px 4px">No hay notificaciones acá.</p>`;
 
     return `
+        <div class="pagina-suave">
         ${Header("News", "Novedades, recordatorios y avisos de tu cuenta")}
 
         <div class="table-toolbar">
@@ -816,6 +817,7 @@ export async function News() {
 
         <div class="section" data-panel="todas">${listaHtml(gruposTodas, fijadasTodas)}</div>
         <div class="section" data-panel="no-leidas" hidden>${listaHtml(gruposNoLeidas, fijadasNoLeidas)}</div>
+        </div>
     `;
 }
 

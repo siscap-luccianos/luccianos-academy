@@ -8216,3 +8216,28 @@ button.calendario-gestion-dia.con-tareas::after{ background:var(--info); }
     background:rgba(255,255,255,.05);
     border-left-color:var(--info);
 }
+
+
+/* ============================
+   News / notificaciones en azul suave (--info): pestañas, noticias sin
+   leer, cajas de aviso. El punto de prioridad "Información" también
+   (ver data/noticias.js). El dorado queda para la marca.
+=============================*/
+.notif-tab:hover{ color:var(--text); }
+.notif-tab.active{
+    background:var(--info-soft);
+    color:var(--info);
+    box-shadow:inset 0 0 0 1px rgba(111,163,216,.45);
+}
+/* Fondo OPACO a propósito (el equivalente sólido de --info-soft sobre
+   --card): la noticia se desliza sobre los botones Leída/Fijar/Eliminar, y
+   con un fondo translúcido esos botones se ven a través. */
+.notif-item.no-leida{
+    background:#232a33;
+    border-color:rgba(111,163,216,.45);
+}
+.form-info-box{
+    background:var(--info-soft);
+    border-color:rgba(111,163,216,.4);
+}
+.form-info-box svg{ color:var(--info); }
