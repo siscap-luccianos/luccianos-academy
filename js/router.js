@@ -45,6 +45,7 @@ import { Manuales, bindManuales } from "./pages/manuales.js";
 import { Movimientos, bindMovimientos } from "./pages/movimientos.js";
 import { Configuracion } from "./pages/configuracion.js";
 import { Integraciones } from "./pages/integraciones.js";
+import { recargarSiCambioElIdioma } from "./i18n/i18n.js";
 
 /** "inicio" es polimórfico: cada rol ve un home distinto. */
 async function Inicio() {
@@ -138,6 +139,11 @@ async function handleRoute() {
 }
 
 async function renderRuta(path, ruta, params) {
+
+    // Si el idioma que le corresponde a esta persona cambió (inició o cerró
+    // sesión alguien de otro país), se recarga para que todo salga en el
+    // idioma correcto — ver i18n/i18n.js.
+    recargarSiCambioElIdioma();
 
     // Un modal abierto vive fuera de #app (document.body) — si el
     // usuario navega sin cerrarlo, limpiarlo acá evita que quede
