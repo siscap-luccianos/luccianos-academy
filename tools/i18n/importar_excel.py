@@ -103,6 +103,14 @@ def main():
     def js(dic, cab):
         cuerpo = "export default {\n" + "".join(f"    {json.dumps(k, ensure_ascii=False)}: {json.dumps(v, ensure_ascii=False)},\n" for k, v in dic.items()) + "};\n"
         return cab + cuerpo
+    # Seguro: no pisar un diccionario ya cargado con uno mucho más chico
+    # (ej. importar un Excel a medio traducir) salvo que se pida con --forzar.
+    for nom, dic in ((f"{codigo}.js", ui), (f"{codigo}.contenido.js", cont)):
+        destino = os.path.join(salida, nom)
+        if os.path.exists(destino) and "--forzar" not in a:
+            previo = len(re.findall(r'^    "', open(destino, encoding="utf8").read(), re.M))
+            if previo and len(dic) < previo * 0.8:
+                sys.exit(f"\nNo se escribió nada: {nom} tiene {previo} textos y el Excel traería {len(dic)}. Si es lo que querés, agregá --forzar.")
     os.makedirs(salida, exist_ok=True)
     open(os.path.join(salida, f"{codigo}.js"), "w", encoding="utf8").write(js(ui, cab_ui))
     open(os.path.join(salida, f"{codigo}.contenido.js"), "w", encoding="utf8").write(js(cont, cab_c))
