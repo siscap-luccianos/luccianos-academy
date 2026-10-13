@@ -1,0 +1,76 @@
+{
+ "tareas": [
+  "Pedido Dore",
+  "Pedido Limpieza",
+  "Checklist Diaria",
+  "Enviar Reportes Fiscales a administración",
+  "Pedido de gaseosas y Agua",
+  "Pedido de leche y crema",
+  "Pedido a la Argentina",
+  "Pedido a Fabrica",
+  "Organizar camara y deposito para conteo de stock mensual",
+  "Verificar vencimientos chocolatería"
+ ],
+ "detalles": [
+  "✓ más de 20 días · ! 20 o menos: rotar · ✕ vencido"
+ ],
+ "subitems": [
+  "Orden de camara",
+  "Orden de deposito",
+  "Limpieza profunda de deck",
+  "Regado de platas",
+  "Limpieza de plantas plásticas",
+  "Limpieza frizer de paletas",
+  "Limpieza frizer de geladots.",
+  "Limpieza profunda de vitrina helados x 2",
+  "Limpieza profunda vitrina palitos",
+  "Limpieza vitrina de pasteleria",
+  "Sacar la basura",
+  "Alfajores",
+  "Conitos",
+  "Viennesi",
+  "Avella",
+  "Tabletas",
+  "Latas",
+  "Squares",
+  "Mini Alfajores Surtidos",
+  "Mini Alfajores Pistacchio"
+ ],
+ "manuales": [
+  "Manual Cafetería 2026",
+  "Productos de Pastelería",
+  "Manual de Inducción (CABA)",
+  "Manual Completo 2026",
+  "Checklist Final de Capacitación",
+  "Cocina Imprenta",
+  "Manual hot Chocolate",
+  "Manuel de limpieza de vitrina",
+  "Manual - Medialunas",
+  "Venta Sugestiva"
+ ],
+ "recursos": [
+  "Reclamos",
+  "Claims Pya",
+  "Relevamientos",
+  "Ponderas de Google",
+  "Herramientas  mkt",
+  "Modular",
+  "Proximas Aperturas",
+  "Auditorias",
+  "Site Jony"
+ ],
+ "cursos": [
+  "Atención al Cliente",
+  "Cafetería",
+  "Heladería",
+  "Icepops",
+  "Pastelería",
+  "Chocolatería",
+  "Sistema y Caja",
+  "Responsables de Local y Turno",
+  "Servicio",
+  "Producto",
+  "Operaciones",
+  "Gestión"
+ ]
+}
