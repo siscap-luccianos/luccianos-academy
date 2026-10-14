@@ -200,10 +200,13 @@ function bloqueAccesosRapidos(usuario) {
 
 /** Idioma de la app: Automático (según el país del local) / Español / English. */
 function bloqueIdioma() {
+    const disponibles = idiomasDisponibles(getUsuarioActual());
+    // Con un solo idioma posible no hay nada que elegir: la tarjeta no se muestra.
+    if (disponibles.length < 2) return "";
     const actual = idiomaElegido();
     const opciones = [
         { id: "auto", etiqueta: "Automático" },
-        ...idiomasDisponibles(getUsuarioActual()),
+        ...disponibles,
     ];
     return `
         <div class="card" style="max-width:420px;margin-top:20px">
