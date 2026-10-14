@@ -20,7 +20,7 @@ import { navigate } from "../router.js";
 import { gasRequest } from "../services/google.js";
 import { setItem } from "../services/storage.js";
 import { VERSION, ES_STAGING } from "../config.js";
-import { idiomaElegido, guardarIdioma } from "../i18n/i18n.js";
+import { idiomaElegido, guardarIdioma, idiomasDisponibles } from "../i18n/i18n.js";
 import { seccionesDisponibles, TABS_POR_ROL } from "../components/bottomNav.js";
 import { getAccesosRapidos, setAccesosRapidos } from "../services/preferenciasAccesos.js";
 
@@ -203,8 +203,7 @@ function bloqueIdioma() {
     const actual = idiomaElegido();
     const opciones = [
         { id: "auto", etiqueta: "Automático" },
-        { id: "es", etiqueta: "Español" },
-        { id: "en", etiqueta: "English" },
+        ...idiomasDisponibles(getUsuarioActual()),
     ];
     return `
         <div class="card" style="max-width:420px;margin-top:20px">

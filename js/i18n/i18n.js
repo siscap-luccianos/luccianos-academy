@@ -19,15 +19,37 @@
    - Para quien usa la app en español NO se carga ningún diccionario ni se
      activa el traductor: cero costo y cero riesgo.
 
-   Idioma: lo elige cada persona en Mi perfil (Automático / Español /
-   English). "Automático" = inglés si su local es de Estados Unidos,
-   español en cualquier otro caso.
+   Idioma: lo elige cada persona en Mi perfil. Español e inglés los puede
+   elegir cualquiera; un idioma local (ver IDIOMAS) solo existe para los
+   locales de su país. "Automático" = inglés si el local es de Estados
+   Unidos, español en cualquier otro caso.
 =============================*/
 
 import { getUsuarioActual } from "../services/auth.js";
 import { paisDelNombre } from "../services/alcance.js";
 
-const CLAVE = "faro_idioma"; // "auto" | "es" | "en"
+const CLAVE = "faro_idioma"; // "auto" | id de un idioma de IDIOMAS
+
+/** Idiomas de la app. Español e inglés los puede elegir cualquier persona.
+ *  Un idioma LOCAL (ej. el dialecto marroquí) se declara con `soloPaises` y
+ *  solo lo ve —y solo puede quedar activo para— quien trabaja en un local de
+ *  esos países; para el resto no existe. `etiqueta` es el nombre del idioma
+ *  escrito en ese mismo idioma. */
+export const IDIOMAS = [
+    { id: "es", etiqueta: "Español" },
+    { id: "en", etiqueta: "English" },
+    // { id: "ar-MA", etiqueta: "الدارجة", soloPaises: ["Marruecos"], dir: "rtl" },
+];
+
+function paisDelUsuario(usuario) {
+    return usuario?.sucursal ? paisDelNombre(usuario.sucursal) : "";
+}
+
+/** Los idiomas que esta persona puede elegir. */
+export function idiomasDisponibles(usuario = getUsuarioActual()) {
+    const pais = paisDelUsuario(usuario);
+    return IDIOMAS.filter((i) => !i.soloPaises || i.soloPaises.includes(pais));
+}
 
 let idiomaActivo = "es";
 let diccionario = new Map();   // texto exacto → traducción
@@ -42,7 +64,7 @@ const cacheFallos = new Set();
 export function idiomaElegido() {
     try {
         const v = localStorage.getItem(CLAVE);
-        return v === "es" || v === "en" ? v : "auto";
+        return IDIOMAS.some((i) => i.id === v) ? v : "auto";
     } catch {
         return "auto";
     }
@@ -50,7 +72,7 @@ export function idiomaElegido() {
 
 export function guardarIdioma(valor) {
     try {
-        if (valor === "es" || valor === "en") localStorage.setItem(CLAVE, valor);
+        if (IDIOMAS.some((i) => i.id === valor)) localStorage.setItem(CLAVE, valor);
         else localStorage.removeItem(CLAVE);
     } catch { /* sin almacenamiento: queda en automático */ }
 }
@@ -58,10 +80,11 @@ export function guardarIdioma(valor) {
 /** El idioma que corresponde HOY a esta persona. */
 export function idiomaEfectivo() {
     const elegido = idiomaElegido();
-    if (elegido !== "auto") return elegido;
     const usuario = getUsuarioActual();
-    const pais = usuario?.sucursal ? paisDelNombre(usuario.sucursal) : "";
-    return pais === "Estados Unidos" ? "en" : "es";
+    // Un idioma local elegido en un dispositivo donde ahora entró otra
+    // persona (de otro país) no se aplica: cae en automático.
+    if (elegido !== "auto" && idiomasDisponibles(usuario).some((i) => i.id === elegido)) return elegido;
+    return paisDelUsuario(usuario) === "Estados Unidos" ? "en" : "es";
 }
 
 export function idiomaActual() {
@@ -69,6 +92,16 @@ export function idiomaActual() {
 }
 
 /* ── Búsqueda ───────────────────────────────────────────── */
+
+/* Terminaciones de plural: el código arma "local" + ("es" si hay más de uno),
+   así que en el diccionario aparece "{0} local{1}". Esas terminaciones son del
+   español ("es", "s", "n"): se capturan con una expresión ESTRICTA (solo esas
+   terminaciones o vacío) y en inglés se resuelven como plural (+s) o singular.
+   Se listan las palabras a mano porque "No leídas{0}" o "…personal{0}" también
+   tienen una letra pegada al {n}, pero ahí {0} es una frase entera, no un plural.
+   Si aparece otro texto con terminación de plural, agregar su palabra acá. */
+const PALABRAS_CON_PLURAL = "local|incidencia|grave|producto|acotado|depende|excluido";
+const RE_SUFIJO = new RegExp(`(?:${PALABRAS_CON_PLURAL})\\{(\\d+)\\}`, "g");
 
 function compilarPatrones(dic) {
     const lista = [];
@@ -79,7 +112,8 @@ function compilarPatrones(dic) {
         const letrasFijas = clave.replace(/\{\d+\}/g, "").replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ]/g, "").length;
         const abierto = /^\{\d+\}/.test(clave) && /\{\d+\}[^A-Za-z]*$/.test(clave);
         const empiezaConGrupo = /^\{\d+\}/.test(clave);
-        if (letrasFijas < (empiezaConGrupo ? 6 : 4) || (abierto && letrasFijas < 12)) continue;
+        const sufijos = new Set([...clave.matchAll(RE_SUFIJO)].map((m) => Number(m[1])));
+        if (!sufijos.size && (letrasFijas < (empiezaConGrupo ? 6 : 4) || (abierto && letrasFijas < 12))) continue;
         // Cada {n} de la clave pasa a ser un grupo de la expresión; el valor
         // los referencia por el MISMO {n} (los números no tienen que ser
         // correlativos), así que se guarda a qué grupo corresponde cada uno.
@@ -88,11 +122,17 @@ function compilarPatrones(dic) {
             .split(/(\{\d+\})/)
             .map((parte) => {
                 const m = parte.match(/^\{(\d+)\}$/);
-                if (m) { grupos.set(Number(m[1]), grupos.size + 1); return "(.*?)"; }
+                if (m) {
+                    grupos.set(Number(m[1]), grupos.size + 1);
+                    if (sufijos.has(Number(m[1]))) return "(s|es|n|en|)";
+                    // En una frase con plural, un {n} inicial es siempre la cantidad: sin
+                    // esto "{0} local{1}" también agarraría "Elegí un local".
+                    return sufijos.size && /^\{\d+\}/.test(clave) && parte === clave.match(/^\{\d+\}/)[0] ? "(\\d+)" : "(.*?)";
+                }
                 return parte.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             })
             .join("");
-        lista.push({ re: new RegExp(`^${re}$`), val: valor, grupos, peso: clave.replace(/\{\d+\}/g, "").length });
+        lista.push({ re: new RegExp(`^${re}$`), val: valor, grupos, sufijos, peso: clave.replace(/\{\d+\}/g, "").length });
     }
     // Los más específicos primero (más texto fijo).
     lista.sort((a, b) => b.peso - a.peso);
@@ -107,7 +147,14 @@ function buscar(nucleo) {
         const m = nucleo.match(p.re);
         // Cada trozo variable capturado también se traduce por su cuenta
         // (ej. " o eliminarla" dentro de una frase más larga).
-        if (m) return p.val.replace(/\{(\d+)\}/g, (_, i) => t(m[p.grupos.get(Number(i))] ?? ""));
+        if (m) {
+            return p.val.replace(/\{(\d+)\}/g, (_, i) => {
+                const captura = m[p.grupos.get(Number(i))] ?? "";
+                // terminación de plural del español → plural del inglés (+s) o nada
+                if (p.sufijos.has(Number(i))) return captura ? "s" : "";
+                return t(captura);
+            });
+        }
     }
     // Numeración pegada al texto ("1. ¿Qué lleva…?", "2) Paso"): se traduce el resto.
     const num = nucleo.match(/^(\d+[.)]\s+)(.+)$/);
