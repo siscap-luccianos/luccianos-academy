@@ -21,6 +21,8 @@ def mayus_como(orig, nuevo):
 def terminos(es, t):
     # exam / store
     t = re.sub(r"\b([Aa])ssessment(s?)\b", lambda m: mayus_como(m.group(0), "exam" + m.group(2)), t)
+    t = re.sub(r"\bASSESSMENTS?\b", lambda m: "EXAMS" if m.group(0).endswith("S") and len(m.group(0)) > 10 else "EXAM", t)
+    t = re.sub(r"\bBRANCH(ES)?\b", lambda m: "STORES" if m.group(1) else "STORE", t)
     t = re.sub(r"\b([Bb])ranch(es)?\b", lambda m: mayus_como(m.group(0), "store" + ("s" if m.group(2) else "")), t)
     # ice cream — salvo el producto "Gelato Shake", que se llama así también en español
     PROT = "\u0001"
@@ -36,6 +38,7 @@ def terminos(es, t):
             return "Ice cream"
         return "ice cream"
     t = re.sub(r"\b[Gg]elato\b", g, t)
+    t = re.sub(r"\bGELATOS?\b", "ICE CREAM", t)         # textos en MAYÚSCULAS
     t = t.replace(PROT, "Gelato")
     return t
 

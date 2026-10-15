@@ -221,3 +221,16 @@ Pasos:
 - **"No existe la hoja 'X'"** en los registros de ejecución → revisá que el nombre de la pestaña sea exactamente ese (sin tildes ni mayúsculas distintas).
 - **La app sigue en "Modo demo" después de pegar GAS_URL** → revisá que no quedó ningún espacio o comilla de más en `config.js`, y que hiciste un F5 duro en el navegador (los módulos JS quedan cacheados).
 - **Error de CORS / fetch falla** → confirmá que el deploy tiene acceso "Cualquier usuario" (no "Solo yo" ni "Cualquiera con cuenta de Google en tu organización").
+
+
+#### `Traducciones` (diccionario interno, #/traducciones)
+
+Las traducciones que el Admin escribe desde **Configuración → Traducciones**. Una fila por texto y por idioma.
+
+| `id` | `idioma` | `es` | `traduccion` | `fechaModificacion` |
+|---|---|---|---|---|
+
+- `idioma`: `en`, `ar-MA`… (los ids de `IDIOMAS` en `js/i18n/i18n.js`).
+- `es`: el texto EXACTO en español de la planilla. Si se cambia el texto en español, esa fila deja de coincidir y el texto vuelve a aparecer como pendiente.
+- Se suman a los diccionarios de la app (`js/i18n/*.js`) y tienen prioridad.
+- Se crea con `setupTraducciones()` (Setup.gs) o a mano con esos encabezados. Backend v1.17.0 (Admin escribe; todos leen). Hay que **re-implementar** el Web App después de pegar el Code.gs.

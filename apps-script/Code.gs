@@ -48,7 +48,7 @@ const SESION_DURACION_MS = 24 * 60 * 60 * 1000; // 24 horas
  * no coincide con el de este archivo, la implementación quedó vieja y
  * no hay nada que depurar. Se sube junto con VERSION de js/config.js.
  */
-const BACKEND_VERSION = "1.16.0";
+const BACKEND_VERSION = "1.17.0";
 
 // Qué rol puede escribir cada hoja. Lectura se maneja aparte (casi
 // todo es legible por cualquier autenticado, con filtros puntuales).
@@ -106,6 +106,12 @@ const PERMISOS_ESCRITURA = {
     // sin pasar por el endpoint "escribir" normal) — "admin" queda solo
     // como excepción para corregir algo a mano si hiciera falta.
     DesafioHistorial: { crear: ["admin"], actualizar: ["admin"], eliminar: ["admin"] },
+    // Traducciones de la app a otros idiomas (inglés, dariya…) escritas desde
+    // Configuración → Traducciones: idioma | es | traduccion. Solo Admin las
+    // crea o cambia; la LECTURA queda abierta a cualquier autenticado a
+    // propósito (no está en LECTURA_SOLO_GESTION): cada persona necesita
+    // bajarlas para ver la app en su idioma, y no tienen nada sensible.
+    Traducciones: { crear: ["admin"], actualizar: ["admin"], eliminar: ["admin"] },
 };
 
 // Hojas cuya lectura queda restringida (el resto la lee cualquier

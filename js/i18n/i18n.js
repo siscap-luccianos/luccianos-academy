@@ -29,6 +29,7 @@ import { getUsuarioActual } from "../services/auth.js";
 import { paisDelNombre } from "../services/alcance.js";
 import { IDIOMAS_EN_VISTA_PREVIA, REVISORES_FIJOS, ES_ENTORNO_PRUEBA } from "../config.js";
 import { cargarRevisoresIngles, revisoresInglesActuales } from "../data/idiomaRevisores.js";
+import { getTraducciones } from "../data/traducciones.js";
 
 const CLAVE = "faro_idioma"; // "auto" | id de un idioma de IDIOMAS
 
@@ -110,7 +111,10 @@ export function puedeVerIdioma(usuario, id) {
  *  cuando llega, si cambió el idioma que le corresponde a esta persona, recarga.
  *  Solo hace algo en vista previa y con una sesión iniciada. */
 export function prepararIdioma() {
-    if (!IDIOMAS_EN_VISTA_PREVIA.length || !getUsuarioActual()) return;
+    if (!getUsuarioActual()) return;
+    // Traducciones del Admin (hoja "Traducciones") para el idioma activo.
+    if (idiomaActivo !== "es") sincronizarTraducciones();
+    if (!IDIOMAS_EN_VISTA_PREVIA.length) return;
     cargarRevisoresIngles()
         .then(() => recargarSiCambioElIdioma())
         .catch(() => { /* sin lista nueva: valen los fijos y lo último guardado */ });
@@ -338,6 +342,72 @@ function observarDOM() {
     });
 }
 
+/* ── Traducciones escritas por el Admin ─────────────────── */
+
+/* Se suman a los diccionarios que vienen con la app y tienen prioridad.
+   Se guardan en el dispositivo para que la primera pantalla ya salga con ellas
+   (sin esperar a la red); apenas llega la lista fresca se actualiza todo. */
+const CLAVE_TRAD = (idioma) => `faro_trad_${idioma}`;
+const VIGENCIA_TRAD_MS = 5 * 60 * 1000;
+let sincronizadoEn = 0;
+
+function norm(texto) {
+    return texto.replace(/\s+/g, " ").trim();
+}
+
+function leerCacheTraducciones(idioma) {
+    try { return JSON.parse(localStorage.getItem(CLAVE_TRAD(idioma)) || "[]"); } catch { return []; }
+}
+
+function aplicarTraducciones(pares) {
+    let hayPatrones = false;
+    for (const [es, tr] of pares) {
+        const clave = es.trim();
+        diccionario.set(clave, tr);
+        contenido.set(clave, tr);
+        contenido.set(es, tr);
+        contenidoNorm.set(norm(es), tr);
+        if (/\{\d+\}/.test(clave)) hayPatrones = true;
+    }
+    if (hayPatrones) patrones = compilarPatrones(diccionario);
+    valoresTraducidos = null;
+    porMayuscula = null;
+    cacheFallos.clear();
+}
+
+function retraducirPantalla() {
+    if (!observador) return;
+    observador.disconnect();
+    try { traducirArbol(document.body); } finally { observarDOM(); }
+}
+
+/** Trae las traducciones del Admin para el idioma activo y las aplica en vivo.
+ *  `forzar` ignora la vigencia (lo usa la pantalla de Traducciones al guardar). */
+export async function sincronizarTraducciones(forzar = false) {
+    if (idiomaActivo === "es" || !getUsuarioActual()) return;
+    if (!forzar && Date.now() - sincronizadoEn < VIGENCIA_TRAD_MS) return;
+    sincronizadoEn = Date.now();
+    const idioma = idiomaActivo;
+    try {
+        const filas = (await getTraducciones()).filter((f) => f.idioma === idioma);
+        const pares = filas.map((f) => [f.es, f.traduccion]);
+        try { localStorage.setItem(CLAVE_TRAD(idioma), JSON.stringify(pares)); } catch { /* sin almacenamiento */ }
+        if (idioma !== idiomaActivo) return;
+        aplicarTraducciones(pares);
+        retraducirPantalla();
+    } catch { /* sin red: quedan las guardadas */ }
+}
+
+/** Todas las traducciones conocidas de un idioma (diccionarios de la app + las del
+ *  Admin), SIN activarlo: es lo que usa la pantalla de Traducciones, que se opera
+ *  siempre en español. Devuelve un Map texto-en-español → traducción. */
+export async function traduccionesDe(idioma) {
+    const [ui, cont] = await Promise.all([import(`./${idioma}.js`), import(`./${idioma}.contenido.js`)]);
+    const mapa = new Map([...Object.entries(ui.default), ...Object.entries(cont.default)]);
+    (await getTraducciones()).filter((f) => f.idioma === idioma).forEach((f) => mapa.set(f.es.trim(), f.traduccion));
+    return mapa;
+}
+
 /* ── Fechas y números en el idioma activo ───────────────── */
 
 let localesParcheados = false;
@@ -395,6 +465,7 @@ export async function iniciarI18n() {
     // cargue para que la primera pantalla ya salga bien.
     const hoja = datos.dir === "rtl" ? cargarHojaRtl() : Promise.resolve();
     await Promise.all([cargarDiccionarios(idioma), hoja]);
+    aplicarTraducciones(leerCacheTraducciones(idioma));
     idiomaActivo = idioma;
     parchearLocales();
     parchearDialogos();

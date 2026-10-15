@@ -22,6 +22,7 @@ const ACCESOS = [
     { titulo: "Evaluaciones", icono: "evaluaciones", href: "#/evaluaciones" },
     { titulo: "Reportes", icono: "reportes", href: "#/reportes" },
     { titulo: "Alertas", icono: "alertas", href: "#/alertas" },
+    { titulo: "Traducciones", icono: "idea", href: "#/traducciones" },
 ];
 
 /** Quién puede ver los idiomas nuevos (inglés y dariya) mientras son vista previa. */

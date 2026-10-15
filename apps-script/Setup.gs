@@ -322,6 +322,35 @@ function setupDisponibilidad() {
     console.log('la red. Se llena sola desde Academia → Catálogo, al acotar alguno.');
 }
 
+/**
+ * setupTraducciones() — crea la hoja "Traducciones".
+ *
+ * Guarda las traducciones que el Admin escribe desde Configuración →
+ * Traducciones: una fila por texto y por idioma (idioma | es | traduccion).
+ * Tienen prioridad sobre los diccionarios que vienen con la app, así que se
+ * puede corregir o agregar una traducción sin subir una versión nueva.
+ * Nace vacía a propósito. Se corre UNA vez a mano (o se crea la pestaña con
+ * esos encabezados).
+ */
+function setupTraducciones() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var hoja = ss.getSheetByName('Traducciones');
+
+    if (hoja) {
+        console.log('La hoja "Traducciones" ya existe — no se toca.');
+        return;
+    }
+
+    hoja = ss.insertSheet('Traducciones');
+    var enc = ['id', 'idioma', 'es', 'traduccion', 'fechaModificacion'];
+    hoja.getRange(1, 1, 1, enc.length).setValues([enc]);
+    hoja.setFrozenRows(1);
+    // Texto plano: las traducciones pueden empezar con "-", "+" o números.
+    hoja.getRange('C:D').setNumberFormat('@');
+
+    console.log('✓ Hoja "Traducciones" creada con: ' + enc.join(' | '));
+}
+
 function setupSyncColumns() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojas = ['Usuarios', 'Cursos', 'Lecciones', 'Noticias', 'Comunicaciones', 'Asignaciones', 'Resultados', 'Manuales'];
