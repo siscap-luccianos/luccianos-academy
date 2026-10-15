@@ -27,23 +27,27 @@
 
 import { getUsuarioActual } from "../services/auth.js";
 import { paisDelNombre } from "../services/alcance.js";
-import { INGLES_SOLO_REVISORES } from "../config.js";
+import { IDIOMAS_EN_VISTA_PREVIA, REVISORES_FIJOS, ES_ENTORNO_PRUEBA } from "../config.js";
 import { cargarRevisoresIngles, revisoresInglesActuales } from "../data/idiomaRevisores.js";
 
 const CLAVE = "faro_idioma"; // "auto" | id de un idioma de IDIOMAS
 
 /** Idiomas de la app. Español e inglés los puede elegir cualquier persona.
- *  Un idioma LOCAL (ej. el dialecto marroquí) se declara con `soloPaises` y
- *  solo lo ve —y solo puede quedar activo para— quien trabaja en un local de
- *  esos países; para el resto no existe. `etiqueta` es el nombre del idioma
- *  escrito en ese mismo idioma. */
+ *  Un idioma LOCAL (el dariya marroquí) se declara con `soloPaises`: solo existe
+ *  para quien trabaja en un local de esos países. `etiqueta` es el nombre del
+ *  idioma escrito en ese mismo idioma; `dir` la dirección del texto; `locale` el
+ *  que usan fechas y números (con cifras 0-9, que son las que usan en Marruecos).
+ *  Mientras un idioma esté en IDIOMAS_EN_VISTA_PREVIA (config.js) solo lo ven
+ *  las personas habilitadas (ver puedeVerIdioma). */
 export const IDIOMAS = [
-    { id: "es", etiqueta: "Español" },
-    // soloRevisores: mientras INGLES_SOLO_REVISORES (config.js) tenga una lista,
-    // el inglés es una vista previa y solo lo ven esas personas.
-    { id: "en", etiqueta: "English", soloRevisores: true },
-    // { id: "ar-MA", etiqueta: "الدارجة", soloPaises: ["Marruecos"], dir: "rtl" },
+    { id: "es", etiqueta: "Español", dir: "ltr" },
+    { id: "en", etiqueta: "English", dir: "ltr", locale: "en-US" },
+    { id: "ar-MA", etiqueta: "الدارجة", dir: "rtl", locale: "ar-MA-u-nu-latn", soloPaises: ["Marruecos"] },
 ];
+
+function datosIdioma(id) {
+    return IDIOMAS.find((i) => i.id === id) || IDIOMAS[0];
+}
 
 function paisDelUsuario(usuario) {
     return usuario?.sucursal ? paisDelNombre(usuario.sucursal) : "";
@@ -80,22 +84,33 @@ function sha256(texto) {
     return H.map((x) => (x >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-/** ¿Esta persona puede ver el inglés? Siempre, salvo que INGLES_SOLO_REVISORES
- *  tenga una lista (vista previa): entonces solo quien esté en esa lista fija
- *  (huellas de email) o haya sido habilitada por el Admin en Configuración
+/** ¿Es una de las personas que ven los idiomas en vista previa? Las fijas
+ *  (huellas de email, config.js) o las que el Admin habilitó en Configuración
  *  (ids de usuario, data/idiomaRevisores.js). */
-export function puedeVerIngles(usuario, lista = INGLES_SOLO_REVISORES, habilitados = revisoresInglesActuales()) {
-    if (!lista) return true;
+export function esRevisor(usuario, habilitados = revisoresInglesActuales()) {
     const email = String(usuario?.email || "").trim().toLowerCase();
-    if (email && lista.includes(sha256(email))) return true;
+    if (email && REVISORES_FIJOS.includes(sha256(email))) return true;
     return usuario?.id != null && habilitados.includes(String(usuario.id));
+}
+
+/** ¿Este idioma existe para esta persona?
+ *  - Español: siempre.
+ *  - En vista previa: solo para los revisores, de cualquier país.
+ *  - Abierto: para todos, salvo un idioma local, que es solo de su país
+ *    (en REPO/local no se aplica esa restricción, para poder probarlo). */
+export function puedeVerIdioma(usuario, id) {
+    const idioma = datosIdioma(id);
+    if (idioma.id === "es") return true;
+    if (IDIOMAS_EN_VISTA_PREVIA.includes(id)) return esRevisor(usuario);
+    if (idioma.soloPaises && !ES_ENTORNO_PRUEBA) return idioma.soloPaises.includes(paisDelUsuario(usuario));
+    return true;
 }
 
 /** Pide en segundo plano la lista de habilitados (sin frenar la pantalla) y,
  *  cuando llega, si cambió el idioma que le corresponde a esta persona, recarga.
  *  Solo hace algo en vista previa y con una sesión iniciada. */
 export function prepararIdioma() {
-    if (!INGLES_SOLO_REVISORES || !getUsuarioActual()) return;
+    if (!IDIOMAS_EN_VISTA_PREVIA.length || !getUsuarioActual()) return;
     cargarRevisoresIngles()
         .then(() => recargarSiCambioElIdioma())
         .catch(() => { /* sin lista nueva: valen los fijos y lo último guardado */ });
@@ -103,8 +118,7 @@ export function prepararIdioma() {
 
 /** Los idiomas que esta persona puede elegir. */
 export function idiomasDisponibles(usuario = getUsuarioActual()) {
-    const pais = paisDelUsuario(usuario);
-    return IDIOMAS.filter((i) => (!i.soloPaises || i.soloPaises.includes(pais)) && (!i.soloRevisores || puedeVerIngles(usuario)));
+    return IDIOMAS.filter((i) => puedeVerIdioma(usuario, i.id));
 }
 
 let idiomaActivo = "es";
@@ -140,7 +154,11 @@ export function idiomaEfectivo() {
     // Un idioma local elegido en un dispositivo donde ahora entró otra
     // persona (de otro país) no se aplica: cae en automático.
     if (elegido !== "auto" && idiomasDisponibles(usuario).some((i) => i.id === elegido)) return elegido;
-    return paisDelUsuario(usuario) === "Estados Unidos" && puedeVerIngles(usuario) ? "en" : "es";
+    // Automático: el idioma del país del local, si está disponible para esta persona.
+    const pais = paisDelUsuario(usuario);
+    if (pais === "Estados Unidos" && puedeVerIdioma(usuario, "en")) return "en";
+    if (pais === "Marruecos" && puedeVerIdioma(usuario, "ar-MA")) return "ar-MA";
+    return "es";
 }
 
 export function idiomaActual() {
@@ -207,7 +225,7 @@ function buscar(nucleo) {
             return p.val.replace(/\{(\d+)\}/g, (_, i) => {
                 const captura = m[p.grupos.get(Number(i))] ?? "";
                 // terminación de plural del español → plural del inglés (+s) o nada
-                if (p.sufijos.has(Number(i))) return captura ? "s" : "";
+                if (p.sufijos.has(Number(i))) return idiomaActivo === "en" && captura ? "s" : "";
                 return t(captura);
             });
         }
@@ -241,7 +259,7 @@ function buscar(nucleo) {
 
 /** Traduce un texto suelto (mensajes de alert/confirm, textos armados en JS). */
 export function t(texto) {
-    if (idiomaActivo !== "en" || typeof texto !== "string") return texto;
+    if (idiomaActivo === "es" || typeof texto !== "string") return texto;
     const m = texto.match(/^(\s*)([\s\S]*?)(\s*)$/);
     const nucleo = m[2].replace(/\s+/g, " ");
     if (!nucleo) return texto;
@@ -249,9 +267,18 @@ export function t(texto) {
     return r == null ? texto : m[1] + r + m[3];
 }
 
+let valoresTraducidos = null;
+/** ¿Este texto es una traducción conocida (de un campo de planilla)? Sirve para no
+ *  guardarla nunca como si fuera el contenido original. */
+export function esTraduccion(texto) {
+    if (idiomaActivo === "es" || typeof texto !== "string" || !texto.trim()) return false;
+    if (!valoresTraducidos) valoresTraducidos = new Set([...contenido.values()].map((v) => v.trim()));
+    return valoresTraducidos.has(texto.trim());
+}
+
 /** Traduce el campo de una planilla (lección, pregunta, tarea…). */
 export function tc(texto) {
-    if (idiomaActivo !== "en" || typeof texto !== "string" || !texto) return texto;
+    if (idiomaActivo === "es" || typeof texto !== "string" || !texto) return texto;
     return contenido.get(texto.trim()) ?? contenido.get(texto) ?? texto;
 }
 
@@ -317,7 +344,7 @@ let localesParcheados = false;
 function parchearLocales() {
     if (localesParcheados) return;
     localesParcheados = true;
-    const mapa = (loc) => (typeof loc === "string" && /^es\b/i.test(loc) ? "en-US" : loc);
+    const mapa = (loc) => (typeof loc === "string" && /^es\b/i.test(loc) ? datosIdioma(idiomaActivo).locale : loc);
     for (const [proto, nombres] of [
         [Date.prototype, ["toLocaleDateString", "toLocaleString", "toLocaleTimeString"]],
         [Number.prototype, ["toLocaleString"]],
@@ -325,12 +352,12 @@ function parchearLocales() {
         for (const nombre of nombres) {
             const original = proto[nombre];
             proto[nombre] = function (loc, ...resto) {
-                return original.call(this, idiomaActivo === "en" ? mapa(loc) : loc, ...resto);
+                return original.call(this, idiomaActivo !== "es" ? mapa(loc) : loc, ...resto);
             };
         }
     }
     const DTF = Intl.DateTimeFormat;
-    Intl.DateTimeFormat = function (loc, ...resto) { return new DTF(idiomaActivo === "en" ? mapa(loc) : loc, ...resto); };
+    Intl.DateTimeFormat = function (loc, ...resto) { return new DTF(idiomaActivo !== "es" ? mapa(loc) : loc, ...resto); };
     Intl.DateTimeFormat.prototype = DTF.prototype;
     Intl.DateTimeFormat.supportedLocalesOf = DTF.supportedLocalesOf;
 }
@@ -345,9 +372,9 @@ function parchearDialogos() {
 /* ── Arranque ───────────────────────────────────────────── */
 
 let diccionariosCargados = false;
-async function cargarDiccionarios() {
+async function cargarDiccionarios(idioma) {
     if (diccionariosCargados) return;
-    const [ui, cont] = await Promise.all([import("./en.js"), import("./en.contenido.js")]);
+    const [ui, cont] = await Promise.all([import(`./${idioma}.js`), import(`./${idioma}.contenido.js`)]);
     diccionario = new Map(Object.entries(ui.default));
     contenido = new Map(Object.entries(cont.default));
     contenidoNorm = new Map([...contenido].map(([k, v]) => [k.replace(/\s+/g, " ").trim(), v]));
@@ -358,16 +385,32 @@ async function cargarDiccionarios() {
 /** Llamar UNA vez al arrancar la app, antes de dibujar la primera pantalla. */
 export async function iniciarI18n() {
     const idioma = idiomaEfectivo();
+    const datos = datosIdioma(idioma);
     document.documentElement.lang = idioma;
-    if (idioma !== "en") { idiomaActivo = "es"; return; }
+    document.documentElement.dir = datos.dir;
+    if (idioma === "es") { idiomaActivo = "es"; return; }
 
-    await cargarDiccionarios();
-    idiomaActivo = "en";
+    // Un idioma de derecha a izquierda necesita su hoja de estilos espejada
+    // (css/rtl.css, generada por tools/i18n/generar_rtl.py): se espera a que
+    // cargue para que la primera pantalla ya salga bien.
+    const hoja = datos.dir === "rtl" ? cargarHojaRtl() : Promise.resolve();
+    await Promise.all([cargarDiccionarios(idioma), hoja]);
+    idiomaActivo = idioma;
     parchearLocales();
     parchearDialogos();
     observador = new MutationObserver(alMutar);
     traducirArbol(document.body);
     observarDOM();
+}
+
+function cargarHojaRtl() {
+    return new Promise((resolver) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "css/rtl.css";
+        link.onload = link.onerror = () => resolver();
+        document.head.appendChild(link);
+    });
 }
 
 /** Si el idioma que corresponde cambió (ej. alguien inició sesión), recarga
