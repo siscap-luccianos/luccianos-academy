@@ -234,3 +234,8 @@ Las traducciones que el Admin escribe desde **Configuración → Traducciones**.
 - `es`: el texto EXACTO en español de la planilla. Si se cambia el texto en español, esa fila deja de coincidir y el texto vuelve a aparecer como pendiente.
 - Se suman a los diccionarios de la app (`js/i18n/*.js`) y tienen prioridad.
 - Se crea con `setupTraducciones()` (Setup.gs) o a mano con esos encabezados. Backend v1.17.0 (Admin escribe; todos leen). Hay que **re-implementar** el Web App después de pegar el Code.gs.
+
+
+#### `DesafioResultados` — columnas `colaboradorFoto` y `colaboradorLocal` (2026-10-15)
+
+Cada partida guarda además la **foto** y el **local** de quien la jugó (`colaboradorNombre` ya estaba). El ranking los usa para mostrar a todos los participantes: un colaborador no puede leer la hoja `Usuarios` (solo su fila), así que sin esto todos los demás salían como "Colaborador" con una "C". Hay que **agregar los dos encabezados** a la hoja (columnas I y J); `_escribirCrudo` ignora en silencio los campos cuyas columnas no existen, así que no rompe nada si faltan: simplemente no se guardan.
