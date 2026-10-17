@@ -31,11 +31,10 @@ const REPO_HOSTNAME = "siscap-luccianos.github.io";
 const HOSTING_FIREBASE_PRUEBAS = ["luccianos-academy-pruebas.web.app", "luccianos-academy-pruebas.firebaseapp.com"];
 export const ES_HOSTING_FIREBASE = typeof location !== "undefined" && HOSTING_FIREBASE_PRUEBAS.includes(location.hostname);
 
-// ENSAYO del lanzamiento: esta misma app publicada en GitHub Pages (repo aparte "luccianos-academy-ensayo" de la cuenta de REPO), con
-// Firebase solo como backend de datos. Se distingue del sitio de REPO (la app vieja, en la raíz de ese mismo dominio) por la carpeta.
-// El día del corte se suma acá el dominio final (ver DISENO_FIREBASE §24); hasta entonces producción no se toca.
-const RUTA_PAGES_ENSAYO = "/luccianos-academy-ensayo/";
-export const ES_PAGES_FIREBASE = typeof location !== "undefined" && location.hostname === REPO_HOSTNAME && location.pathname.startsWith(RUTA_PAGES_ENSAYO);
+// El entorno REPO de la versión Firebase: esta app publicada en GitHub Pages en la cuenta de REPO (la ruta vieja de REPO,
+// /luccianos-academy/, y el ensayo /luccianos-academy-ensayo/), con Firebase solo como backend de datos y el Firebase de PRUEBAS.
+// Producción (luccianos-academy.github.io) se suma el día del corte con su propio Firebase (ver DISENO_FIREBASE §24 y §25).
+export const ES_PAGES_FIREBASE = typeof location !== "undefined" && location.hostname === REPO_HOSTNAME;
 
 export const ES_STAGING = typeof location !== "undefined" && (location.hostname === REPO_HOSTNAME || ES_HOSTING_FIREBASE);
 
@@ -165,7 +164,7 @@ export const PUSH_DISPONIBLE = !!FIREBASE_CONFIG.apiKey && !!FIREBASE_VAPID_KEY;
  *  saber de un vistazo qué versión corre en cada entorno y no
  *  confundir REPO con producción. Se sube a mano cada vez que se
  *  pushea un cambio — no hay build step que lo automatice. */
-export const VERSION = "0.6.5";
+export const VERSION = "0.6.6";
 
 export const EMPRESA = {
     nombre: "Lucciano's",
