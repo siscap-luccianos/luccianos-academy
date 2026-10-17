@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+
+    <meta charset="UTF-8">
+    <!-- Interfaz fija (2026-09-02, pedido explícito: "similar a
+         WhatsApp/Chess.com... que no se corra ni se desalinee al
+         pellizcar para hacer zoom"). maximum-scale=1 + user-scalable=no
+         bloquea el pellizco; touch-action:manipulation en css/base.css
+         suma la otra mitad (evita el zoom por doble-tap) sin tocar el
+         scroll normal. Sacrifica el zoom nativo de accesibilidad a
+         propósito — la app ya tiene su propio control de tamaño de
+         fuente donde hace falta, esto es una herramienta interna, no
+         un sitio público. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>Lucciano's Academy</title>
+
+    <!-- Open Graph: controla la vista previa al compartir el link por
+         WhatsApp/redes — estas apps rastrean la página UNA vez y
+         guardan esa foto en sus propios servidores, así que si el
+         título cambia hay que forzar un re-rastreo (Facebook Sharing
+         Debugger) además de actualizar estas etiquetas. -->
+    <meta property="og:title" content="Lucciano's Academy">
+    <meta property="og:description" content="Guía, enseña y lleva a cada colaborador al máximo potencial.">
+    <meta property="og:image" content="https://luccianos-academy.github.io/assets/icons/icon-512.png">
+    <meta property="og:url" content="https://luccianos-academy.github.io">
+    <meta property="og:type" content="website">
+
+    <!-- Íconos + manifest: permiten "Agregar a inicio" desde el celular
+         con el ícono real de Lucciano's, como si fuera una app instalada. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#111111">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Lucciano's">
+
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/responsive.css">
+
+    <!-- hl=es: fuerza el botón de Google en español (antes caía al
+         idioma del navegador, mostrando "Sign in with Google" en
+         inglés en algunos teléfonos — inconsistente con el resto de
+         la app, 100% en español). -->
+    <script src="https://accounts.google.com/gsi/client?hl=es" async defer></script>
+
+    <!-- Firebase Cloud Messaging (push real) — build "compat" a
+         propósito: mismo estilo de API que usa sw.js vía importScripts
+         (que no puede usar el SDK modular ES, los service workers
+         clásicos no soportan import/export). Mientras config.js no
+         tenga los valores reales del proyecto (ver FIREBASE_CONFIG),
+         services/push.js no llama nada de esto — cargar el script no
+         alcanza para pedir permiso ni registrar un token. -->
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js"></script>
+
+</head>
+
+<body>
+
+    <div id="app"></div>
+
+    <script type="module" src="js/app.js"></script>
+
+</body>
+
+</html>

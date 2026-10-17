@@ -1,0 +1,240 @@
+/* ============================
+   Lucciano's Academy
+   services/alcance.js — Qué contenido le aplica a cada persona
+
+   Un solo set de cursos y lecciones para toda la red, segmentado por
+   dónde trabaja cada uno. Chocolatería no se vende en Chile, batidos no
+   en Uruguay, y dentro de Argentina hay locales chicos sin cafetería ni
+   pastelería. Duplicar los módulos por país se rompe solo: cuando
+   cambia un procedimiento hay que acordarse de editarlo en tres lados,
+   y a los meses divergieron sin que nadie lo note.
+
+   El campo "aplicaA" es una lista separada por comas que mezcla PAÍSES
+   y LOCALES:
+
+       aplicaA: "Argentina, Uruguay"                 → toda esa red
+       aplicaA: "Lucciano's Agüero CABA"             → un local puntual
+       aplicaA: "Uruguay, Lucciano's Oroño Santa Fe" → mezcla
+
+   VACÍO = le aplica a todos. Es la semántica correcta —lo normal es que
+   un contenido valga para toda la red y la excepción se declare— y la
+   misma que usa Noticias.dirigidoA. OJO que es la OPUESTA a
+   Manuales.visiblePara, donde vacío significa que no lo ve nadie: esa
+   inconsistencia ya causó problemas y no hay que replicarla.
+
+   El país sale de la sucursal de la persona (Sucursales.pais), nunca se
+   le pregunta. Preguntarlo sería fricción en cada ingreso y además se
+   puede contestar mal.
+=============================*/
+
+/** Compara nombres de local/país escritos de forma despareja en la
+ *  planilla: distinta capitalización, tildes o espacios de más. */
+export function normalizar(s) {
+    return String(s || "")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        // El apóstrofo tipográfico (’) y el recto (\') son caracteres
+        // DISTINTOS, y en la planilla conviven los dos: "Lucciano’s Oroño
+        // Santa Fe" se cargó con el curvo y el resto con el recto. Sin
+        // unificarlos, un local escrito de una forma no matchea contra el
+        // mismo nombre escrito de la otra — y esa comparación es la que
+        // decide qué contenido ve cada persona. Fallaba en silencio.
+        .replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+/* El país está en el sufijo del nombre de cada local — "Lucciano's
+   Pocitos Uruguay", "Lucciano's Weston USA" — y los argentinos terminan
+   en provincia. Esto es el respaldo de la columna "pais" de la hoja: si
+   una fila la tiene vacía (recién cargada, o antes de correr
+   completarPaises() en Setup.gs) el local no queda sin país y el filtro
+   por país lo sigue encontrando.
+
+   La columna manda siempre que tenga valor: un local puede llamarse de
+   una forma que no diga su país, y ahí se carga a mano. */
+const PAIS_POR_SUFIJO = {
+    uruguay: "Uruguay",
+    paraguay: "Paraguay",
+    chile: "Chile",
+    espana: "España",
+    usa: "Estados Unidos",
+    italia: "Italia",
+    marruecos: "Marruecos",
+    morocco: "Marruecos",
+    maroc: "Marruecos",
+};
+
+export function paisDelNombre(nombre) {
+    const t = normalizar(nombre).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    if (!t) return "";
+    return PAIS_POR_SUFIJO[t.split(" ").pop()] || "Argentina";
+}
+
+/**
+ * El país de una persona, deducido de su local. "" solo si la persona
+ * no tiene local asignado.
+ *
+ * Las sucursales son OPCIONALES, y que lo sean es lo que hace viable
+ * todo esto: la regla se consulta desde una docena de pantallas, y
+ * exigirles cargar la lista de sucursales para poder preguntar habría
+ * significado volver asíncronas funciones que hoy no lo son. Cuando se
+ * pasan, manda la columna "pais" de la hoja —un local puede llamarse de
+ * una forma que no diga su país—; cuando no, se deduce del nombre, que
+ * es de donde sale esa columna igual.
+ */
+export function paisDe(usuario, sucursales = []) {
+    const miLocal = normalizar(usuario?.sucursal);
+    if (!miLocal) return "";
+    const suc = sucursales.find((s) => normalizar(s.nombre) === miLocal);
+    if (suc) return String(suc.pais || "").trim() || paisDelNombre(suc.nombre);
+    return paisDelNombre(usuario.sucursal);
+}
+
+/**
+ * ¿Este curso o lección le aplica a esta persona?
+ *
+ * Admin y Supervisor ven todo: gestionan el contenido, y si no no
+ * podrían revisar lo que le toca a otra red. Mismo criterio que
+ * puedeVerManual.
+ *
+ * Una persona sin local asignado no matchea contra nada acotado: no hay
+ * forma de saber qué le corresponde, y es mejor que le falte contenido
+ * a que vea el de otra red.
+ */
+export function aplicaAlUsuario(item, usuario, sucursales = []) {
+    const incluye = String(item?.aplicaA || "").trim();
+    const excluye = String(item?.noAplicaA || "").trim();
+    if (!incluye && !excluye) return true;
+    if (!usuario) return false;
+    if (usuario.rol === "admin" || usuario.rol === "supervisor") return true;
+
+    const miLocal = normalizar(usuario.sucursal);
+    const miPais = normalizar(paisDe(usuario, sucursales));
+    // Tipo de MI local (propio/franquicia), solo si me pasaron la lista
+    // de sucursales — hace falta únicamente para tokens "País:Tipo".
+    const miSuc = sucursales.find((x) => normalizar(x.nombre) === miLocal);
+    const miTipo = miSuc ? (miSuc.esPropio ? "propios" : "franquicias") : "";
+    const meNombra = (lista) => lista
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .some((raw) => {
+            if (raw.includes(":")) {
+                const [pais, tipo] = raw.split(":").map(normalizar);
+                return !!miPais && !!miTipo && pais === miPais && tipo === miTipo;
+            }
+            const t = normalizar(raw);
+            return t === miLocal || (miPais && t === miPais);
+        });
+
+    // La exclusión gana. Es lo que permite decir "esto es para toda la
+    // red MENOS Devoto" sin tener que enumerar los otros 122 locales en
+    // aplicaA, que es el caso más frecuente: un local que no tiene
+    // cafetería es una excepción suya, no una propiedad de las 26
+    // lecciones de Cafetería.
+    if (excluye && meNombra(excluye)) return false;
+    if (!incluye) return true;
+    return meNombra(incluye);
+}
+
+/**
+ * Los cursos que le corresponden a una persona — ÚNICA fuente de
+ * verdad.
+ *
+ * Antes esta regla ("Gestión solo para encargados") estaba copiada en
+ * cinco lugares distintos: el progreso de Mi equipo, el semáforo, el
+ * dashboard y las tablas. Sumar el alcance por país/local en cada copia
+ * garantizaba que alguna quedara sin actualizar y el progreso diera
+ * distinto según la pantalla.
+ *
+ * Que el progreso salga de acá es lo que hace que un chileno que
+ * completó sus 6 cursos aplicables vea 100% y no 75%.
+ */
+export function cursosDeLaPersona(cursos, persona, sucursales = []) {
+    return (cursos || []).filter((cur) => cursoAplicaAPersona(cur, persona, sucursales));
+}
+
+/**
+ * La misma pregunta para UN curso. Existe porque varias pantallas
+ * arman una grilla de curso × persona y necesitan pintar "No aplica"
+ * celda por celda, sin filtrar la lista entera.
+ */
+export function cursoAplicaAPersona(curso, persona, sucursales = []) {
+    // Bug real reportado en vivo (2026-08-25): faltaba responsableTurno
+    // acá — un Responsable de turno (sin ser también de local) veía el
+    // curso "Responsables de Local y Turno" desde Academia (pages/
+    // cursos.js tiene su propio chequeo, ya arreglado) pero no desde
+    // Inicio, que usa ESTA función. Mismo criterio en los dos lugares.
+    if (curso?.categoria === "Gestión" && !persona?.encargado && !persona?.responsableTurno) return false;
+    return aplicaAlUsuario(curso, persona, sucursales);
+}
+
+/** Las lecciones de un curso que le corresponden a una persona. Un
+ *  curso puede aplicar entero y tener adentro alguna lección que no —
+ *  ej. Cafetería sí, pero la lección de batidos no en Uruguay. */
+export function leccionesDeLaPersona(lecciones, persona, sucursales = []) {
+    return (lecciones || []).filter((l) => aplicaAlUsuario(l, persona, sucursales));
+}
+
+/**
+ * Misma pregunta que aplicaAlUsuario ("¿esto le corresponde?"), pero
+ * contra una SUCURSAL directa en vez de una persona — Gestión semanal
+ * (pages/gestion.js) filtra tareas para el local que esté activo en
+ * el selector, no para "quien está logueado" (Admin/Supervisor miran
+ * cualquier local ajeno en modo lectura). Es una función aparte y no
+ * un caso más de aplicaAlUsuario a propósito: esa función es la
+ * columna vertebral de Cursos/Lecciones desde hace tiempo y ya
+ * funciona bien — tocarla para sumarle un modo "sin persona" es más
+ * riesgo que las ~15 líneas que se repiten acá.
+ *
+ * Suma un token nuevo al vocabulario de aplicaA/noAplicaA que
+ * Cursos/Lecciones no necesitan: "Propios"/"Franquicias", contra
+ * Sucursales.esPropio (mismo campo que ya usa Canales para "Encargados
+ * — Locales propios/Franquicias"). Se puede combinar con país/local
+ * como cualquier otro token: "Propios, Uruguay" = todos los propios +
+ * toda la red de Uruguay.
+ */
+export function aplicaASucursal(item, sucursal) {
+    const incluye = String(item?.aplicaA || "").trim();
+    const excluye = String(item?.noAplicaA || "").trim();
+    if (!incluye && !excluye) return true;
+    if (!sucursal) return false;
+
+    const miLocal = normalizar(sucursal.nombre);
+    const miPais = normalizar(sucursal.pais);
+    const miTipo = sucursal.esPropio ? "propios" : "franquicias";
+    // "País:Tipo" (ej. "Argentina:Propios") es un token compuesto y
+    // exige LAS DOS cosas a la vez — es lo único que permite el cruce
+    // "solo los propios de Argentina", que con tokens sueltos no
+    // existe (suman, no se cruzan). Los tokens de siempre (país, tipo
+    // o local suelto) siguen funcionando igual.
+    const meNombra = (lista) => lista
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .some((raw) => {
+            if (raw.includes(":")) {
+                const [pais, tipo] = raw.split(":").map(normalizar);
+                return !!miPais && pais === miPais && tipo === miTipo;
+            }
+            const t = normalizar(raw);
+            return t === miLocal || (miPais && t === miPais) || t === miTipo;
+        });
+
+    // Misma prioridad que aplicaAlUsuario: la exclusión gana.
+    if (excluye && meNombra(excluye)) return false;
+    if (!incluye) return true;
+    return meNombra(incluye);
+}
+
+/**
+ * ¿Esta tarea/ítem le aplica a ALGÚN local de este país? Para trabajar
+ * "sobre Argentina" o "sobre Chile" en el catálogo sin elegir un local
+ * puntual: se prueba contra un local propio y uno franquicia de ese
+ * país, y alcanza con que le aplique a uno de los dos.
+ */
+export function aplicaAPais(item, pais) {
+    const base = { nombre: "", pais };
+    return aplicaASucursal(item, { ...base, esPropio: true }) || aplicaASucursal(item, { ...base, esPropio: false });
+}

@@ -1,0 +1,385 @@
+/* ============================
+   Lucciano's Academy
+   responsive.css
+=============================*/
+
+@media (max-width:900px){
+
+    .layout{
+        grid-template-columns:1fr;
+    }
+
+    /* El botón "¿Cómo funciona...?" (compose-page-header, News/
+       Comunicaciones/Recursos) se corría del todo del viewport en
+       celular — la fila entera es un solo flex sin wrap, y con un
+       título largo no le quedaba lugar. Reportado por el usuario
+       probando en un iPhone real. flex-wrap baja el botón a su
+       propia línea en vez de recortarlo. */
+    .compose-page-header{
+        flex-wrap:wrap;
+    }
+
+    .compose-page-header .compose-ayuda{
+        margin-left:0;
+    }
+
+    .mascota-carga video{
+        width:110px;
+        height:110px;
+    }
+
+    /* Sin espacio para el hero de marca al lado del formulario — se
+       prioriza el login, la foto se saca en vez de achicarla mal. */
+    .login-split{
+        grid-template-columns:1fr;
+    }
+
+    /* Manuales, formulario de carga: con 2+ archivos, forzar 3
+       columnas (link/etiqueta/borrar) en el ancho de un celular
+       sacaba la fila de la pantalla — pedido explícito: "debería
+       estar en columna en ese caso". Una sola columna, apiladas. */
+    .archivo-manual-item{
+        grid-template-columns:1fr;
+    }
+
+    /* Manuales, lista YA cargada: con 2+ archivos, los botones
+       ("Ver manual"/etiqueta de cada uno) se probaban wrappear entre
+       sí, pero al no tener un ancho propio quedaban todos en una fila
+       que se salía de la pantalla en vez de romper línea — reportado
+       en vivo, con captura, sobre la vista ya cargada (no el
+       formulario). width:100% fuerza que la fila SÍ tenga un ancho
+       acotado para que flex-wrap funcione de verdad; column además
+       los deja más cómodos de tocar en celular que en fila apretada. */
+    .manual-item-acciones{
+        width:100%;
+        flex-direction:column;
+        align-items:stretch;
+    }
+
+    .manual-item-acciones .btn{
+        text-align:center;
+    }
+
+    .login-hero-panel{
+        display:none;
+    }
+
+    /* El sidebar pasa a ser un drawer fijo, oculto fuera de la
+       pantalla (translateX) hasta que se le agrega .abierto — así
+       en celular no hay que scrollear todo el menú antes de llegar
+       al contenido. */
+    .sidebar{
+        position:fixed;
+        top:0;
+        left:0;
+        height:100vh;
+        width:270px;
+        max-width:82vw;
+        padding:24px;
+        transform:translateX(-100%);
+        transition:transform .25s ease;
+        z-index:1000;
+    }
+
+    .sidebar.abierto{
+        transform:translateX(0);
+    }
+
+    .nav-menu{
+        flex-direction:column;
+    }
+
+    .sidebar-install-banner{
+        display:block;
+    }
+
+    /* La barra superior (topbar.js) reemplaza al botón hamburguesa
+       suelto: agrupa hamburguesa + logo + campana. Es sticky (en
+       flujo, se pega arriba al scrollear), así ya no tapa los banners
+       ni hace falta padding-top de rescate en ellos ni en el content. */
+    .topbar{
+        display:flex;
+    }
+
+    /* En mobile el mismo avatar ya vive adentro de la topbar de
+       arriba (ver components/topbar.js) — mostrar los dos sería
+       redundante. */
+    .avatar-header-desktop{
+        display:none;
+    }
+
+    /* El toast de bienvenida de Historia es position:fixed (no vive en
+       el flujo, la topbar sticky no lo corre solo) — sin este ajuste
+       quedaba tapado detrás de la topbar en celular. */
+    .historia-toast{
+        top:70px;
+    }
+
+    /* Tabs inferiores (bottomNav.js) — mobile-only, mismo breakpoint
+       que la topbar. El componente ya devuelve "" para Admin, así que
+       este display:flex no le agrega una barra vacía a nadie más. */
+    .bottom-nav{
+        display:flex;
+    }
+
+    /* .bottom-nav es hermano de .layout (no de .content, que está
+       anidado un nivel más adentro) — de ahí el combinador en dos
+       pasos: .layout:has(~ .bottom-nav) detecta el hermano posterior,
+       .content hereda el padding como descendiente. */
+    .layout:has(~ .bottom-nav) .content{
+        padding-bottom:78px;
+    }
+
+    .sidebar-cerrar{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        position:absolute;
+        top:20px;
+        right:20px;
+        width:32px;
+        height:32px;
+        background:none;
+        border:none;
+        color:#fff;
+    }
+
+    .sidebar-backdrop.visible{
+        display:block;
+        position:fixed;
+        inset:0;
+        background:rgba(0,0,0,.5);
+        z-index:900;
+    }
+
+    .content{
+        --content-pad:20px;
+        padding:20px;
+    }
+
+    .grid-2-1{
+        grid-template-columns:1fr;
+    }
+
+    .protagonista{
+        grid-template-columns:1fr;
+    }
+
+    .protagonista-img{
+        min-height:160px;
+    }
+
+    .hero-lobby-cta{
+        width:100%;
+    }
+
+    .stats{
+        grid-template-columns:1fr 1fr;
+    }
+
+    .table-toolbar input[type="search"],
+    .table-toolbar select{
+        width:100%;
+    }
+}
+
+/* ============================
+   Liquid Glass (celular) — es el estilo del celular para todos (decisión
+   del 2026-10-09, después de probarlo como opción: "la mejora es
+   absoluta"). En escritorio no cambia nada.
+   Barra de abajo flotante y translúcida, encabezado de vidrio y
+   tarjetas principales en vidrio sobre un fondo con dos manchas suaves
+   (sin algo de color detrás, el desenfoque no se nota).
+   Perf: backdrop-filter solo en lo grande y poco repetido (barra,
+   encabezado, hero, tarjetas destacadas). Las tarjetas comunes
+   (.card, que pueden ser decenas en una lista) llevan solo fondo
+   translúcido, que es barato.
+=============================*/
+@media (max-width:900px){
+
+    html body::before{
+        content:"";
+        position:fixed;
+        inset:0;
+        z-index:-1;
+        pointer-events:none;
+        background:
+            radial-gradient(circle 280px at -5% 18%, rgba(194,130,70,.38), transparent 70%),
+            radial-gradient(circle 300px at 105% 82%, rgba(60,140,150,.34), transparent 70%);
+    }
+
+    html .topbar{
+        background:rgba(20,18,16,.42);
+        -webkit-backdrop-filter:blur(18px) saturate(1.6);
+        backdrop-filter:blur(18px) saturate(1.6);
+        border-bottom:1px solid rgba(255,255,255,.09);
+    }
+
+    html .topbar-btn{
+        background:rgba(255,255,255,.1);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.25);
+    }
+
+    html .bottom-nav{
+        left:14px;
+        right:14px;
+        bottom:calc(14px + env(safe-area-inset-bottom, 0px));
+        padding:0 6px;
+        border-radius:32px;
+        background:rgba(255,255,255,.1);
+        -webkit-backdrop-filter:blur(22px) saturate(1.8);
+        backdrop-filter:blur(22px) saturate(1.8);
+        border:1px solid rgba(255,255,255,.22);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.35), inset 0 -1px 0 rgba(255,255,255,.06), 0 10px 30px rgba(0,0,0,.4);
+        align-items:center;
+    }
+
+    html .bottom-nav-item{
+        color:rgba(243,237,226,.72);
+        padding:7px 4px 8px;
+        margin:6px 0;
+        border-radius:22px;
+    }
+
+    /* Una sola línea por etiqueta: la barra tiene alto fijo y no se
+       estira si una etiqueta es larga. */
+    html .bottom-nav-item span{
+        max-width:100%;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    html .bottom-nav-item.active{
+        color:#fff;
+        background:rgba(255,255,255,.18);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+    }
+
+    /* La barra ahora flota 14px arriba del borde — más aire abajo para que
+       el último contenido no quede tapado. */
+    html .layout:has(~ .bottom-nav) .content{
+        padding-bottom:110px;
+    }
+
+    html .hero-lobby,
+    html .protagonista,
+    html .contenido-nuevo-card,
+    html .curso-progreso-sticky{
+        background:rgba(255,255,255,.07);
+        -webkit-backdrop-filter:blur(14px);
+        backdrop-filter:blur(14px);
+        border:1px solid rgba(255,255,255,.14);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 8px 24px rgba(0,0,0,.25);
+    }
+
+    /* Los títulos de sección ("Lucciano's Agüero CABA", "Viernes 9/10"…)
+       se pegaban arriba al scrollear y llevaban fondo negro sólido
+       (var(--bg)) para tapar lo que pasa por detrás: con las manchas de
+       color de fondo se veía como un rectángulo negro pegado al título
+       (reportado en Gestión y en Colaboradores). Un desenfoque en vez del
+       negro dejaba otra caja, así que en el celular el título simplemente
+       deja de pegarse: queda en su lugar, sin fondo. En escritorio no
+       cambia nada (ahí el fondo es liso y el negro no se nota). */
+    html .section > h3{
+        position:static;
+        background:transparent;
+    }
+
+    /* La barra de acciones del pie (News, etc.) se desvanecía a negro
+       sólido; ahora a un negro suave que deja ver el fondo. */
+    html .compose-footer{
+        background:linear-gradient(to top, rgba(14,13,12,.8) 55%, transparent);
+    }
+
+    html .card{
+        background:rgba(255,255,255,.05);
+        border:1px solid rgba(255,255,255,.1);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
+    }
+
+    html .leccion-item{
+        background:rgba(255,255,255,.05);
+        border-color:rgba(255,255,255,.1);
+    }
+}
+
+@media (max-width:600px){
+
+    /* Fila etiqueta/valor (Mi perfil, etc.) — en vez de wrapear
+       apretado y right-aligned al lado de la etiqueta (.list .item
+       arriba ya evita que se corte, pero en 2 líneas cortas queda
+       feo), en celular angosto se apila: etiqueta arriba, valor
+       abajo a la izquierda. Mismo bug real del iPhone (fila "Email"). */
+    .list .item{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:4px;
+    }
+
+    .list .item > strong{
+        text-align:left;
+    }
+
+    /* El banner de curso usa height:480px fijo (components.css) pensado
+       para el ancho de un panel de escritorio — en una pantalla angosta
+       eso lo vuelve casi cuadrado y recorta por los costados una foto
+       compuesta a 16:9 (le pasa a Cafetería/Pastelería/Atención al
+       Cliente, que traen texto quemado en la imagen y no un overlay en
+       HTML). aspect-ratio mantiene la proporción real en cualquier ancho. */
+    .curso-video-banner video,
+    .curso-video-banner img{
+        height:auto;
+        aspect-ratio:16/9;
+    }
+
+    /* En celular el viewport ya es angosto — el video vertical de
+       lección se ve bien a ancho completo, sin el límite de altura
+       pensado para pantallas de escritorio (ver components.css). */
+    .leccion-video-wrap .leccion-imagen{
+        width:100%;
+        max-height:none;
+    }
+
+    .stats{
+        grid-template-columns:1fr;
+    }
+
+    .modal{
+        max-width:92%;
+    }
+
+    table.data-table th,
+    table.data-table td{
+        padding:14px 16px;
+        font-size:13px;
+    }
+
+    .quick-actions{
+        grid-template-columns:1fr 1fr;
+    }
+
+    .trend-chart{
+        gap:6px;
+    }
+
+    .hero-colaborador-right{
+        width:100%;
+        justify-content:flex-start;
+    }
+
+    .continue-card{
+        flex-direction:column;
+        align-items:stretch;
+        text-align:center;
+    }
+
+    .btn-continue{
+        text-align:center;
+    }
+
+    .badge-row,
+    .academia-grid{
+        grid-template-columns:1fr 1fr;
+    }
+}

@@ -1,0 +1,148 @@
+/* ============================
+   Lucciano's Academy
+   base.css — Reset y tipografía
+=============================*/
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* Marca cursiva "Lucciano's" (Allura, SIL Open Font License) — se usa
+   puntualmente como firma de marca en encabezados de curso, nunca
+   como tipografía de lectura general. */
+@font-face{
+    font-family:'LuccianoScript';
+    src:url('../assets/fonts/Allura-Regular.ttf') format('truetype');
+    font-display:swap;
+}
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+/* Desalentar la descarga casual de fotos/video de marca (contenido
+   bajo confidencialidad) — ver services/protegerMedia.js para el
+   resto (clic derecho, botón nativo de descarga del video). Esto
+   cubre lo que el JS no puede: el menú que aparece al MANTENER
+   APRETADO sobre una imagen en celular ("Guardar imagen"/"Agregar a
+   Fotos") es un gesto táctil nativo del sistema operativo, no un
+   evento de mouse — -webkit-touch-callout es la única forma de
+   apagarlo. user-select evita además arrastrar/seleccionar la imagen
+   como si fuera texto. */
+img, video{
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+}
+
+/* Sin esto, cualquier elemento que se pase del ancho del viewport por
+   apenas unos píxeles (una tabla ancha sin wrapper, un tooltip, el
+   sidebar) vuelve TODA la página scrolleable de costado — en celular
+   eso se siente como que la app entera "se corre" al tocar/scrollear,
+   en vez de quedar fija. Los que sí necesitan scroll horizontal propio
+   (ej. .table-wrapper) lo declaran ellos mismos y siguen funcionando:
+   esto solo bloquea el desborde a nivel de página. */
+/* "clip" y no "hidden": son idénticos para tapar el desborde lateral,
+   pero "hidden" convierte al elemento en un contenedor de scroll, y eso
+   ROMPE todo position:sticky que haya adentro — se pegan a esta caja en
+   vez de al viewport y en la práctica no se pegan a nada. Así estaban
+   fallando la barra de selección múltiple y la topbar mobile.
+   SOLO en "html", no en "body" también: tenerlo en los DOS a la vez
+   (como estaba antes) crea DOS contenedores de scroll anidados en vez
+   de uno — según el navegador cuál de los dos gana es ambiguo, y en
+   Android (confirmado con captura real: la topbar se despega y deja un
+   hueco negro arriba al scrollear) terminaba rompiendo el sticky igual
+   que "hidden". Con la regla en un solo elemento (la raíz) no hay
+   ambigüedad: "html" es el único que scrollea, todo lo sticky se pega
+   a él. "body" queda sin ninguna regla de overflow. */
+html{
+    overflow-x:hidden;
+    overflow-x:clip;
+    /* Mitad del bloqueo de zoom (ver el <meta viewport> en index.html):
+       esto apaga el zoom por doble-tap sin tocar el scroll normal
+       (pan-x/pan-y siguen andando). El pellizco lo bloquea el meta tag. */
+    touch-action:manipulation;
+}
+
+body{
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    width:100%;
+}
+
+button{
+    font-family:inherit;
+}
+
+h1,h2,h3{
+    font-weight:800;
+}
+
+h1{ font-size:28px; }
+h2{ font-size:22px; }
+h3{ font-size:16px; }
+
+a{
+    text-decoration:none;
+    color:inherit;
+}
+
+.text-sm{ font-size:13px; }
+.text-xs{ font-size:12px; }
+.text-muted{ color:var(--muted); }
+
+/* Campos de texto — pedido explícito del usuario, mismo criterio
+   visual que el cuadro de texto de Claude: fondo oscuro de la página,
+   la CAJA un gris suave apenas más claro (no blanco, no negro puro),
+   borde blanco muy fino. Antes no había una regla base: cualquier
+   input/textarea/select sin una clase propia (ej. la caja de
+   comentario en Comunicaciones) quedaba con el estilo blanco por
+   defecto del navegador, un choque fuerte contra el tema oscuro.
+   Reglas más específicas (.form-seccion textarea, etc.) siguen
+   ganando donde ya existen — esto solo cubre el piso común. */
+input[type="text"],
+input[type="email"],
+input[type="search"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="url"],
+input[type="tel"],
+textarea,
+select{
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.18);
+    border-radius:var(--radius-sm);
+    color:var(--text);
+    font-family:inherit;
+    font-size:14px;
+    padding:10px 14px;
+    transition:border-color var(--transition), background var(--transition);
+}
+
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="search"]::placeholder,
+input[type="password"]::placeholder,
+input[type="number"]::placeholder,
+input[type="url"]::placeholder,
+input[type="tel"]::placeholder,
+textarea::placeholder{
+    color:var(--muted);
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="search"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+input[type="url"]:focus,
+input[type="tel"]:focus,
+textarea:focus,
+select:focus{
+    outline:none;
+    border-color:var(--gold);
+    background:rgba(255,255,255,.07);
+}

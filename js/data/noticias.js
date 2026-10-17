@@ -1,0 +1,418 @@
+/* ============================
+   Lucciano's Academy
+   data/noticias.js — Tabla "Noticias" (centro de notificaciones)
+
+   Base del centro de notificaciones (campana, ver components/topbar.js
+   y pages/notificaciones.js) — antes era una lista plana sin
+   destinatarios ni estado de lectura, ahora suma:
+
+   - "tipo": categoría (ver TIPOS_NOTIFICACION) — define ícono/color en
+     la lista.
+   - "prioridad": ver PRIORIDADES — define el color del punto/borde.
+   - "visiblePara"/"sucursal": MISMO patrón que data/manuales.js (rol y/o
+     local destinatario), con una diferencia a propósito: acá vacío =
+     visible para TODOS (broadcast), no "inactivo" — así las noticias
+     viejas (creadas antes de que existiera este campo) se siguen
+     viendo igual que siempre, sin tener que migrarlas a mano.
+   - "leidoPor": lista de ids de usuario separada por comas, en la
+     misma fila (sin tabla nueva) — a esta escala (~20-30 usuarios,
+     decenas de notificaciones) una celda de texto alcanza de sobra.
+=============================*/
+
+import { fetchSheet, writeSheet, updateSheet, deleteSheet } from "../services/dataSource.js";
+import { noticiasMock } from "./mock/noticias.mock.js";
+import { HOJAS } from "../config.js";
+import { getSucursales } from "./sucursales.js";
+import { listaTieneId } from "../services/ids.js";
+import { paisDe, normalizar } from "../services/alcance.js";
+
+// A quién apunta una noticia (campo "dirigidoA"). News es solo para
+// colaboradores — Supervisión y Admin SIEMPRE reciben copia y ven
+// todo (pedido explícito del usuario: "supervisión debe estar al
+// tanto de todo para no perderse nada", Comunicaciones ya cubre
+// operaciones entre supervisores). Por eso no hay opción de dirigir
+// a supervisor/capacitador/admin como público objetivo.
+//   "paises"               → uno o más países elegidos a mano (campo
+//                            "paisesA", país de la persona — no el
+//                            local puntual, mismo criterio que
+//                            alcance.js), con la opción de excluir
+//                            locales puntuales adentro (campo
+//                            "noAplicaA"). ES EL DEFAULT del formulario
+//                            de una News nueva, con Argentina PRE-
+//                            TILDADA porque es el país operativo — pero
+//                            se puede destildar como cualquier otro
+//                            país (ej. para armar una News de "todos
+//                            menos Argentina"). Antes el default era
+//                            "todos los colaboradores", que le llegaba
+//                            también a España, Chile, Uruguay... una
+//                            News pensada para el día a día de
+//                            Argentina salía para toda la red.
+//   ""                     → todos los colaboradores de TODA la red,
+//                            de cualquier país — sigue existiendo para
+//                            cuando hace falta de verdad (ej. un aviso
+//                            de la marca), pero ya no es lo que se
+//                            tilda sin pensar.
+//   "encargados-propios"   → encargados de locales propios (dinámico, Sucursales.esPropio)
+//   "encargados-franquicias" → encargados de franquicias (por descarte)
+//   "colaboradores-local"  → colaboradores de los locales elegidos (campo "sucursal")
+//   "solo-admin"           → NADIE más que Admin (prueba) — pedido
+//                            explícito del usuario: poder probar el
+//                            flujo sin enviarle a ningún colaborador.
+export const DIRIGIDO_A = [
+    { id: "paises", nombre: "País(es)" },
+    { id: "", nombre: "Todos los colaboradores (todos los países)" },
+    { id: "encargados-propios", nombre: "Responsables de local — Locales propios" },
+    { id: "encargados-franquicias", nombre: "Responsables de local — Franquicias" },
+    { id: "colaboradores-local", nombre: "Locales específicos" },
+    { id: "usuarios-especificos", nombre: "Usuarios específicos (Admin only)" },
+    { id: "solo-admin", nombre: "Solo Admin (prueba)" },
+];
+
+export const TIPOS_NOTIFICACION = [
+    { id: "noticia", nombre: "Noticia", icono: "noticias" },
+    { id: "curso", nombre: "Nuevo curso", icono: "academia" },
+    { id: "manual", nombre: "Manual", icono: "reportes" },
+    { id: "evaluacion", nombre: "Evaluación", icono: "evaluaciones" },
+    { id: "recordatorio", nombre: "Recordatorio", icono: "alertas" },
+    { id: "cuenta", nombre: "Cuenta", icono: "perfil" },
+];
+
+export const PRIORIDADES = [
+    { id: "urgente", nombre: "Urgente", color: "var(--danger)" },
+    { id: "importante", nombre: "Importante", color: "var(--warning)" },
+    { id: "info", nombre: "Información", color: "var(--info)" },
+    { id: "baja", nombre: "Baja", color: "var(--muted)" },
+];
+
+function normalizarNoticia(f) {
+    return {
+        id: f.id,
+        titulo: String(f.titulo || "").trim(),
+        fecha: String(f.fecha || "").trim().slice(0, 10),
+        resumen: String(f.resumen || "").trim(),
+        // Todos opcionales — se completan solo si la noticia lo amerita
+        // (ver pages/noticias.js): "detalle" es texto largo que se
+        // muestra plegado, "enlace" es el id de un Curso para el botón
+        // "Ir al curso", "adjuntoUrl" es un archivo (PDF, etc.) para el
+        // botón "Ver adjunto" — ruta local (assets/docs/...) o link
+        // externo, igual criterio que las fotos de Chocolatería. Si
+        // están vacíos, la tarjeta se ve como antes.
+        detalle: String(f.detalle || "").trim(),
+        enlace: String(f.enlace || "").trim(),
+        // adjuntos es un array [{url, label}, ...]. Puede venir como JSON desde
+        // Sheets (adjuntos) o convertirse desde los antiguos adjuntoUrl/adjuntoLabel.
+        adjuntos: (() => {
+            try {
+                if (f.adjuntos && String(f.adjuntos).trim()) {
+                    const parsed = JSON.parse(f.adjuntos);
+                    if (Array.isArray(parsed)) return parsed;
+                    // Se parseó pero no es un array — no debería pasar
+                    // nunca (crearNoticia siempre guarda un array), pero
+                    // si pasa, mejor decirlo que caer en silencio al
+                    // fallback de un solo adjunto.
+                    console.warn(`Noticia ${f.id}: "adjuntos" no es un array, cae a adjuntoUrl (un solo link) —`, f.adjuntos);
+                }
+            } catch (e) {
+                // Reportado en vivo: "tenía dos enlaces, salió solo uno" —
+                // si esto tira, es exactamente por qué: el fallback de
+                // abajo (adjuntoUrl) SOLO guarda el primer link, el resto
+                // se pierde de la vista aunque la fila tenga los dos bien
+                // guardados. Antes esto fallaba en silencio total.
+                console.warn(`Noticia ${f.id}: no se pudo leer "adjuntos" como JSON, cae a adjuntoUrl (un solo link) —`, e.message, f.adjuntos);
+            }
+            if (f.adjuntoUrl) {
+                return [{ url: String(f.adjuntoUrl).trim(), label: String(f.adjuntoLabel || "Ver adjunto").trim() }];
+            }
+            return [];
+        })(),
+        // Deprecated — solo para compat. Usar adjuntos[0] en su lugar.
+        adjuntoUrl: String(f.adjuntoUrl || "").trim(),
+        adjuntoLabel: String(f.adjuntoLabel || "").trim(),
+        tipo: String(f.tipo || "noticia").trim() || "noticia",
+        prioridad: String(f.prioridad || "info").trim() || "info",
+        // Hora de envío para noticias PROGRAMADAS ("HH:MM") — la usará
+        // el trigger de backend (pendiente) para el envío automático.
+        // Vacío en las que se publican al toque.
+        hora: String(f.hora || "").trim(),
+        // A quién apunta (ver DIRIGIDO_A). Vacío = todos los
+        // colaboradores. Reemplaza al viejo "visiblePara" (por rol) —
+        // las filas viejas con visiblePara se leen igual acá (fallback)
+        // para no romper noticias ya creadas.
+        dirigidoA: String(f.dirigidoA || "").trim(),
+        // Solo se usa cuando dirigidoA === "colaboradores-local":
+        // lista de locales separada por comas (mismo componente que
+        // Manuales). Compat: filas viejas guardaban esto en "sucursal".
+        sucursal: String(f.sucursal || "").trim(),
+        // Solo se usa cuando dirigidoA === "paises": qué países la
+        // reciben, separados por comas (ej. "Argentina, España").
+        paisesA: String(f.paisesA || "").trim(),
+        // Locales puntuales que NO la reciben aunque estén en uno de
+        // esos países (mismo patrón "la exclusión gana" que
+        // Cursos.noAplicaA — ver services/alcance.js). Lista separada
+        // por comas.
+        noAplicaA: String(f.noAplicaA || "").trim(),
+        // Compat con noticias viejas que dirigían por rol antes de esta
+        // reestructuración — solo se lee, ya no se escribe.
+        visiblePara: String(f.visiblePara || "").trim(),
+        leidoPor: String(f.leidoPor || "").trim(),
+        usuariosEspecificos: String(f.usuariosEspecificos || "").trim(),
+        // Fijada arriba de todo, antes que el agrupado por fecha —
+        // pedido explícito del usuario para avisos muy importantes que
+        // no deberían perderse entre las demás News del día.
+        destacado: String(f.destacado || "").trim().toUpperCase() === "SI",
+        // Fijado PERSONAL — a diferencia de "destacado" (lo decide quien
+        // crea la News, vale para todos los que la ven), esto es a
+        // gusto de cada persona: cualquiera puede fijar/desfijar
+        // cualquier News que le interese, sin afectar lo que ven los
+        // demás. Mismo patrón que "leidoPor" — lista de ids separada
+        // por comas en la misma fila.
+        fijadoPor: String(f.fijadoPor || "").trim(),
+    };
+}
+
+/** Quién queda alcanzado por el "no heredás el histórico de News": solo
+ *  las altas POSTERIORES a esta fecha. Todos los que ya estaban al
+ *  2026-09-17 siguen viendo lo mismo de siempre — ver el comentario
+ *  largo dentro de puedeVerNoticia para por qué el corte es fijo y no
+ *  se compara contra fechaAlta a secas. */
+const CORTE_HISTORICO_NEWS = "2026-09-17";
+
+/** Quién ve una noticia. News es SOLO para colaboradores como público
+ *  objetivo — Admin y Supervisor (incluido Capacitador) SIEMPRE la ven
+ *  (copia automática, "supervisión al tanto de todo"). El resto se
+ *  resuelve según dirigidoA. `sucursales` (opcional) solo hace falta
+ *  para los modos propios/franquicias (miran Sucursales.esPropio); si
+ *  no se pasa, esos modos no matchean a nadie (criterio conservador). */
+export function puedeVerNoticia(noticia, usuario, sucursales = []) {
+    // Si tiene usuariosEspecificos, SOLO esos usuarios la ven (Admin siempre)
+    const usuariosEspecificos = String(noticia.usuariosEspecificos || "").trim();
+    if (usuariosEspecificos) {
+        if (usuario.rol === "admin") return true;
+        // listaTieneId y no includes(String(...)): la planilla devuelve
+        // los ids con cola decimal a veces ("1786486477496.17"), y
+        // comparados como texto no coinciden con ninguno. Con la lista
+        // no vacía, eso dejaba la News SIN LLEGARLE A NADIE y sin ningún
+        // error visible. Ver services/ids.js.
+        return listaTieneId(usuariosEspecificos, usuario.id);
+    }
+    
+    const dirigidoA = String(noticia.dirigidoA || "").trim();
+
+    // "Solo Admin (prueba)": NADIE más que Admin — ni siquiera
+    // Supervisión, que normalmente recibe copia de todo. Es el modo de
+    // prueba para no molestar a nadie mientras se arma una News.
+    if (dirigidoA === "solo-admin") return usuario.rol === "admin";
+
+    // Supervisión y Admin ven/reciben copia de TODO el resto.
+    if (usuario.rol === "admin" || usuario.rol === "supervisor") return true;
+
+    // Bandeja limpia para quien se incorpora DESPUÉS de esta fecha: una
+    // News publicada antes de su alta no le aparece. Sin esto, alguien
+    // cargado hoy abría la app y se encontraba con meses de avisos
+    // ajenos —de otro país, de franquicias, de operativas ya
+    // terminadas— como si fueran nuevos.
+    //
+    // El corte fijo NO es una fecha arbitraria ni se puede mover para
+    // atrás: los 163 usuarios que ya existían tienen fechaAlta
+    // 2026-07-17 (la carga inicial de la nómina, no el día real en que
+    // entró cada uno), y hay News del 2026-07-16 — un solo día antes.
+    // Comparando contra fechaAlta a secas, toda esa gente perdía las
+    // News anteriores al 17/7 apenas volviera a loguearse. Quedó
+    // decidido que a los que ya están no les cambia nada.
+    //
+    // Va DESPUÉS de usuariosEspecificos a propósito: si a una News
+    // vieja le agregan a esta persona por nombre, es una decisión
+    // explícita de que la vea, y esa gana.
+    const fechaAlta = String(usuario.fechaAlta || "").trim().slice(0, 10);
+    const fechaNoticia = String(noticia.fecha || "").trim().slice(0, 10);
+    if (fechaAlta && fechaNoticia && fechaAlta > CORTE_HISTORICO_NEWS && fechaNoticia < fechaAlta) {
+        return false;
+    }
+
+    // Compat: noticias viejas sin dirigidoA pero con visiblePara/sucursal
+    // por el modelo anterior — se respetan como estaban.
+    if (!dirigidoA) {
+        const visiblePara = String(noticia.visiblePara || "").trim();
+        const sucursalVieja = String(noticia.sucursal || "").trim();
+        if (visiblePara || sucursalVieja) {
+            if (sucursalVieja) {
+                const locales = sucursalVieja.split(",").map((s) => s.trim()).filter(Boolean);
+                return locales.includes(usuario.sucursal);
+            }
+            const roles = visiblePara.split(",").map((r) => r.trim()).filter(Boolean);
+            const paraEncargado = roles.includes("encargado") && usuario.encargado;
+            return roles.includes("colaborador") || paraEncargado;
+        }
+        return true; // sin nada = todos los colaboradores
+    }
+
+    if (dirigidoA === "colaboradores-local") {
+        const locales = String(noticia.sucursal || "").split(",").map((s) => s.trim()).filter(Boolean);
+        return locales.includes(usuario.sucursal);
+    }
+
+    // "País(es)" = el país de la persona, no el texto literal del
+    // local (mismo criterio que paisDe en alcance.js: un local que no
+    // dice el país en el nombre igual cae bien porque la columna
+    // "pais" de Sucursales manda). Sin países elegidos no le llega a
+    // nadie — mismo criterio conservador que el resto de esta función:
+    // sin match explícito, no se muestra. La exclusión (noAplicaA) se
+    // compara normalizada — el apóstrofo tipográfico de algunos locales
+    // ya rompió esta misma comparación una vez en Cursos.
+    if (dirigidoA === "paises") {
+        const paises = String(noticia.paisesA || "").split(",").map(normalizar).filter(Boolean);
+        if (!paises.length || !paises.includes(normalizar(paisDe(usuario, sucursales)))) return false;
+        const excluidos = String(noticia.noAplicaA || "").split(",").map(normalizar).filter(Boolean);
+        return !excluidos.includes(normalizar(usuario.sucursal));
+    }
+
+    if (dirigidoA === "encargados-propios" || dirigidoA === "encargados-franquicias") {
+        if (!usuario.encargado) return false;
+        const sucursal = sucursales.find((s) => s.nombre === usuario.sucursal);
+        const esPropio = !!(sucursal && sucursal.esPropio);
+        return dirigidoA === "encargados-propios" ? esPropio : !esPropio;
+    }
+
+    // A esta altura dirigidoA ya no puede ser "" (esa rama devolvió
+    // arriba) ni ninguno de los modos conocidos — incluye el caso
+    // "usuarios-especificos" con la lista de usuariosEspecificos vacía
+    // (por un guardado incompleto, por ejemplo). Antes esto devolvía
+    // true y la noticia terminaba visible para TODOS los colaboradores
+    // — exactamente el bug reportado en producción ("a quienes no le
+    // corresponde lo ven de todas maneras"). Sin un match explícito,
+    // por defecto no se muestra.
+    return false;
+}
+
+export function estaLeida(noticia, usuarioId) {
+    return String(noticia.leidoPor || "").split(",").map((s) => s.trim()).filter(Boolean).includes(String(usuarioId));
+}
+
+/** Una noticia con fecha futura está PROGRAMADA — todavía no se
+ *  publicó. Los destinatarios (colaboradores/supervisión) no la ven
+ *  hasta ese día; solo Admin la ve antes (para gestionarla). Pedido
+ *  del usuario: "armo hoy porque ya tengo la info, le pongo fecha a
+ *  futuro y ese día se envía". OJO: esto es la parte CLIENTE (se
+ *  muestra sola al llegar la fecha, cada vez que se abre la app). El
+ *  push automático en la fecha + el recordatorio a Supervisión
+ *  necesitan un disparador de tiempo en el backend (Apps Script
+ *  time-driven trigger) — no está hecho todavía, ver nota en news.js. */
+export function estaProgramada(noticia) {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const [y, m, d] = String(noticia.fecha || "").split("-").map(Number);
+    if (!y || !m || !d) return false;
+    return new Date(y, m - 1, d) > hoy;
+}
+
+export async function getNoticias() {
+    try {
+        const filas = await fetchSheet(HOJAS.NOTICIAS, noticiasMock);
+        return filas.map(normalizarNoticia).sort((a, b) => b.fecha.localeCompare(a.fecha));
+    } catch (err) {
+        console.warn(`No se pudo leer '${HOJAS.NOTICIAS}':`, err.message);
+        return [];
+    }
+}
+
+/** Noticias visibles para un usuario puntual — para la campana y el
+ *  centro de notificaciones. Admin ve todas (para poder gestionarlas). */
+export async function getNoticiasVisibles(usuario) {
+    const todas = await getNoticias();
+    if (usuario.rol === "admin") return todas;
+    // sucursales solo hace falta para los modos propios/franquicias
+    // (miran esPropio); se prefetchea una vez y se pasa a cada chequeo.
+    const sucursales = await getSucursales();
+    // Las programadas (fecha futura) todavía no se muestran a los
+    // destinatarios — recién aparecen el día que les toca.
+    return todas.filter((n) => !estaProgramada(n) && puedeVerNoticia(n, usuario, sucursales));
+}
+
+export async function crearNoticia({ titulo, fecha, resumen, detalle, enlace, adjuntos, adjuntoUrl, adjuntoLabel, tipo, prioridad, dirigidoA, sucursal, hora, usuariosEspecificos, destacado }) {
+    // adjuntos es un array [{url, label}]. Si viene vacío pero hay adjuntoUrl (fallback),
+    // lo convierte. Guarda como JSON en la columna "adjuntos".
+    const adjuntosFinales = adjuntos && adjuntos.length > 0
+        ? adjuntos
+        : (adjuntoUrl ? [{ url: adjuntoUrl, label: adjuntoLabel || "Ver adjunto" }] : []);
+
+    const datosParaGuardar = {
+        titulo, fecha, resumen,
+        detalle: detalle || "", enlace: enlace || "",
+        adjuntos: adjuntosFinales.length > 0 ? JSON.stringify(adjuntosFinales) : "",
+        adjuntoUrl: adjuntosFinales.length > 0 ? adjuntosFinales[0].url : "",
+        adjuntoLabel: adjuntosFinales.length > 0 ? adjuntosFinales[0].label : "",
+        tipo: tipo || "noticia", prioridad: prioridad || "info",
+        dirigidoA: dirigidoA || "", sucursal: sucursal || "",
+        hora: hora || "",
+        usuariosEspecificos: usuariosEspecificos || "",
+        destacado: destacado ? "SI" : "NO",
+        leidoPor: "",
+    };
+    console.log("Guardando noticia:", { titulo, adjuntos: datosParaGuardar.adjuntos });
+    return writeSheet(HOJAS.NOTICIAS, datosParaGuardar, noticiasMock);
+}
+
+export async function actualizarNoticia(id, cambios) {
+    // Mismo problema que ya se había resuelto para "destacado" en
+    // news.js, pero para adjuntos: si cambios.adjuntos viene como
+    // array crudo (tal cual arma leerCamposNotificacion() en el
+    // formulario), hay que convertirlo a JSON antes de guardarlo —
+    // igual que hace crearNoticia() más arriba. Bug real reportado en
+    // vivo: editar el adjunto de una noticia ya publicada (ej.
+    // reemplazar una imagen) guardaba "editada" sin error, pero la
+    // celda "adjuntos" quedaba con texto que no es JSON válido — al
+    // releerla, el parse fallaba en silencio (ver normalizarNoticia) y
+    // caía al adjuntoUrl VIEJO, así que el cambio nunca se veía.
+    if (Array.isArray(cambios.adjuntos)) {
+        const adjuntosFinales = cambios.adjuntos;
+        cambios = {
+            ...cambios,
+            adjuntos: adjuntosFinales.length > 0 ? JSON.stringify(adjuntosFinales) : "",
+            adjuntoUrl: adjuntosFinales.length > 0 ? adjuntosFinales[0].url : "",
+            adjuntoLabel: adjuntosFinales.length > 0 ? adjuntosFinales[0].label : "",
+        };
+    }
+    return updateSheet(HOJAS.NOTICIAS, id, cambios, noticiasMock);
+}
+
+/** Agrega el id del usuario a "leidoPor" si todavía no estaba. */
+export async function marcarNotificacionLeida(noticia, usuarioId) {
+    if (estaLeida(noticia, usuarioId)) return;
+    const actuales = String(noticia.leidoPor || "").split(",").map((s) => s.trim()).filter(Boolean);
+    actuales.push(String(usuarioId));
+    await actualizarNoticia(noticia.id, { leidoPor: actuales.join(",") });
+}
+
+/** Inverso de marcarNotificacionLeida — saca al usuario de "leidoPor".
+ *  Para el gesto de swipe (deslizar y "marcar como no leída", mismo
+ *  patrón que Gmail): a diferencia de marcar como leída, esto sí puede
+ *  deshacerse desde la lista sin abrir el detalle. */
+export async function marcarNotificacionNoLeida(noticia, usuarioId) {
+    if (!estaLeida(noticia, usuarioId)) return;
+    const actuales = String(noticia.leidoPor || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const restantes = actuales.filter((id) => id !== String(usuarioId));
+    await actualizarNoticia(noticia.id, { leidoPor: restantes.join(",") });
+}
+
+/** Fijado personal — a diferencia de "destacado" (lo decide quien crea
+ *  la News, se aplica igual para todos), cualquiera puede fijar/
+ *  desfijar cualquier News que le resulte relevante A ÉL, sin afectar
+ *  lo que ven los demás. Pedido explícito del usuario: "que el usuario
+ *  también pueda fijar a gusto las News que sean relevantes para ellos
+ *  independiente de que si yo lo hago". */
+export function estaFijadaPersonal(noticia, usuarioId) {
+    return String(noticia.fijadoPor || "").split(",").map((s) => s.trim()).filter(Boolean).includes(String(usuarioId));
+}
+
+export async function toggleFijadaPersonal(noticia, usuarioId) {
+    const actuales = String(noticia.fijadoPor || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const yaFijada = actuales.includes(String(usuarioId));
+    const nuevos = yaFijada
+        ? actuales.filter((id) => id !== String(usuarioId))
+        : [...actuales, String(usuarioId)];
+    await actualizarNoticia(noticia.id, { fijadoPor: nuevos.join(",") });
+}
+
+export async function eliminarNoticia(id) {
+    return deleteSheet(HOJAS.NOTICIAS, id, noticiasMock);
+}

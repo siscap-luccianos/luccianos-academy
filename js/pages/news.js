@@ -1,0 +1,1359 @@
+/* ============================
+   Lucciano's Academy
+   pages/news.js — Centro de avisos (campana)
+
+   Reemplaza a la vieja "Noticias" (lista plana, sin destinatarios ni
+   estado de lectura): ahora es la bandeja única a la que apunta la
+   campana (components/topbar.js) — noticias, cursos nuevos, manuales,
+   evaluaciones, recordatorios y avisos de cuenta, todo en un mismo
+   lugar, con leído/no leído por persona (ver data/noticias.js).
+
+   Mantiene el mismo criterio dual que Manuales/la vieja Noticias:
+   Colaborador/Supervisor ven y marcan como leído; Admin suma el panel
+   de gestión (crear/editar/eliminar) sobre la misma pantalla, sin
+   ruta de administración aparte. Se registra bajo la ruta "news"
+   (router.js).
+=============================*/
+
+import { Header } from "../components/header.js";
+import { abrirModal, cerrarModal } from "../components/modal.js";
+import { MultiSelectSucursales, bindMultiSelectSucursales } from "../components/multiSelectSucursales.js";
+import { MultiSelectUsuarios, bindMultiSelectUsuarios } from "../components/multiSelectUsuarios.js";
+import { renderProcedimiento } from "../components/procedimiento.js";
+import { Icon } from "../components/icons.js";
+import {
+    getNoticias, getNoticiasVisibles, crearNoticia, actualizarNoticia, eliminarNoticia,
+    marcarNotificacionLeida, marcarNotificacionNoLeida, estaLeida, puedeVerNoticia,
+    estaFijadaPersonal, toggleFijadaPersonal,
+    TIPOS_NOTIFICACION, PRIORIDADES, DIRIGIDO_A,
+} from "../data/noticias.js";
+import { getCursos } from "../data/cursos.js";
+import { getUsuarios } from "../data/usuarios.js";
+import { mismoId } from "../services/ids.js";
+import { getSucursales } from "../data/sucursales.js";
+import { registrarEvento } from "../data/auditoria.js";
+import { getUsuarioActual } from "../services/auth.js";
+import { getItem, setItem } from "../services/storage.js";
+import { gasRequest } from "../services/google.js";
+import { navigate } from "../router.js";
+import { actualizarContadorCampana, decrementarContadorCampana } from "../components/topbar.js";
+import { mandarPush } from "../services/push.js";
+import { getTokens } from "../data/tokens.js";
+
+// Categorías de noticia — texto libre, pero se recuerdan como pills
+// para reusar (pedido del usuario: "poner a gusto y que aparezca como
+// ya usado"). Es UNA lista editable en localStorage: se siembra con
+// las base la primera vez, se suma cada categoría nueva, y se puede
+// BORRAR cualquier pill (pedido: "dejá que borre las etiquetas ya
+// cargadas por si lo deseo"). Al borrarlas todas, no se re-siembran.
+const CLAVE_CATEGORIAS = "categorias_noticia";
+const CATEGORIAS_BASE = ["Curso", "Procedimiento", "Producto", "Capacitación", "Certificados", "Novedad", "Beneficios", "Campaña"];
+
+function categoriasRecordadas() {
+    const guardadas = getItem(CLAVE_CATEGORIAS, null);
+    // null = nunca se tocó la lista → sembrar con las base. Un array
+    // vacío guardado = el usuario las borró todas a propósito, se
+    // respeta (no se re-siembra).
+    if (!Array.isArray(guardadas)) return [...CATEGORIAS_BASE];
+    return guardadas.map((c) => String(c).trim()).filter(Boolean);
+}
+
+function recordarCategoria(categoria) {
+    const c = String(categoria || "").trim();
+    // "noticia" es el tipo por defecto cuando no se elige categoría —
+    // no es una etiqueta real, no debe quedar guardada como pill.
+    if (!c || c.toLowerCase() === "noticia") return;
+    const lista = categoriasRecordadas();
+    if (!lista.some((x) => x.toLowerCase() === c.toLowerCase())) {
+        setItem(CLAVE_CATEGORIAS, [...lista, c]);
+    }
+}
+
+function olvidarCategoria(categoria) {
+    const c = String(categoria || "").trim().toLowerCase();
+    setItem(CLAVE_CATEGORIAS, categoriasRecordadas().filter((x) => x.toLowerCase() !== c));
+}
+
+/** Quién puede crear una News — pedido del usuario: "el apartado de
+ *  News es el que solo supervisor puede crear". Admin también (gestiona
+ *  todo). Capacitador queda afuera (es Supervisor con flag, pero su
+ *  regla es solo ver/comentar). Editar/eliminar una News ya publicada
+ *  queda solo para Admin (moderación) — News no guarda autor. */
+function puedeCrearNoticia(usuario) {
+    return usuario.rol === "admin" || (usuario.rol === "supervisor" && !usuario.capacitador);
+}
+
+/**
+ * A quién le llegó esta News, en castellano.
+ *
+ * Sin esto, una vez enviada no quedaba en NINGÚN lado a quién había
+ * ido: el dato estaba guardado (dirigidoA + sucursal + usuariosEspecificos)
+ * pero no se mostraba. Pedido del usuario: "si envié pero no presté
+ * atención a quién, sería un problema".
+ *
+ * Devuelve texto plano; quien lo pinte tiene que escaparlo (los
+ * nombres de usuarios y locales salen de la planilla).
+ */
+async function descripcionDestinatarios(noti) {
+    const dirigido = String(noti.dirigidoA || "").trim();
+
+    // El ORDEN de estos chequeos tiene que ser el MISMO que el de
+    // puedeVerNoticia (data/noticias.js), que es quien decide de verdad a
+    // quién le llega. Ahí usuariosEspecificos manda por sobre dirigidoA:
+    // si hay gente en esa lista, SOLO esa gente la ve, diga lo que diga
+    // dirigidoA.
+    //
+    // Esta función miraba dirigidoA primero y caía a "Todos los
+    // colaboradores" cuando no matcheaba. Resultado: una News mandada a
+    // dos personas se entregaba bien, pero el cartel decía que había ido
+    // a toda la red. Reportado en vivo: "le envié un news a dos personas
+    // de prueba y en el mensaje enviado dice a todos los colaboradores".
+    const ids = String(noti.usuariosEspecificos || "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length) {
+        const usuarios = await getUsuarios();
+        // Un id que ya no está en la nómina se muestra como id en vez de
+        // desaparecer: que falte un destinatario de la lista sería
+        // justamente lo que este texto tiene que dejar ver.
+        // mismoId y no ===: la planilla devuelve los ids con cola decimal
+        // a veces, y comparados como texto no encuentran a nadie — se veía
+        // "1 usuario(s): id 1786486477496.17" en vez del nombre.
+        const nombres = ids.map((id) => usuarios.find((u) => mismoId(u.id, id))?.nombre || `usuario dado de baja (${id})`);
+        return `${nombres.length} usuario(s): ${nombres.join(", ")}`;
+    }
+
+    if (dirigido === "solo-admin") {
+        return "Solo vos — modo prueba, no le llegó a ningún colaborador";
+    }
+
+    if (dirigido === "usuarios-especificos") {
+        // Se eligió el modo pero la lista quedó vacía: la News en los
+        // hechos sale para todos, así que hay que decirlo sin vueltas.
+        return "Usuarios específicos, pero no quedó ninguno seleccionado — les llegó a todos los colaboradores";
+    }
+
+    if (dirigido === "colaboradores-local") {
+        const locales = String(noti.sucursal || "").split(",").map((s) => s.trim()).filter(Boolean);
+        return locales.length
+            ? `Colaboradores de ${locales.length} local(es): ${locales.join(", ")}`
+            : "Locales específicos — ninguno seleccionado";
+    }
+
+    if (dirigido === "paises") {
+        const paises = String(noti.paisesA || "").split(",").map((s) => s.trim()).filter(Boolean);
+        if (!paises.length) return "País(es) — ninguno seleccionado, no le llegó a nadie";
+        const excluidos = String(noti.noAplicaA || "").split(",").map((s) => s.trim()).filter(Boolean);
+        const base = paises.join(", ");
+        return excluidos.length ? `${base}, salvo ${excluidos.length} local(es): ${excluidos.join(", ")}` : base;
+    }
+
+    // Un dirigidoA que no matchea ningún modo conocido es el mismo caso
+    // "por defecto no se muestra" de puedeVerNoticia — decirlo así en
+    // vez de adivinar un nombre, para no mostrar "Argentina" sobre una
+    // News que en los hechos no le llegó a nadie.
+    const conocido = DIRIGIDO_A.find((d) => d.id === dirigido);
+    return conocido ? conocido.nombre : "Ningún destinatario reconocido — revisala";
+}
+
+/** Bloque "Enviada a:" del detalle. Solo para quien gestiona News
+ *  (Admin/Supervisor): a un colaborador no le aporta saber a qué otro
+ *  grupo le llegó, y podría leerse como que ve datos de terceros. */
+function bloqueDestinatarios(texto) {
+    return `
+        <div class="notif-destinatarios">
+            <span class="text-xs text-muted">Enviada a</span>
+            <div class="text-sm">${escaparHtml(texto)}</div>
+        </div>
+    `;
+}
+
+function tipoInfo(tipoId) {
+    const conocido = TIPOS_NOTIFICACION.find((t) => t.id === tipoId);
+    if (conocido) return conocido;
+    // Categoría de texto libre (ej. "Novedad", "Producto") — se
+    // muestra tal cual la escribió el usuario, con el ícono genérico
+    // de noticia. "noticia"/"" caen al primer tipo base.
+    const texto = String(tipoId || "").trim();
+    if (!texto || texto === "noticia") return TIPOS_NOTIFICACION[0];
+    return { icono: "noticias", nombre: texto };
+}
+
+function prioridadInfo(prioridadId) {
+    return PRIORIDADES.find((p) => p.id === prioridadId) || PRIORIDADES[2];
+}
+
+function escaparHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// "YYYY-MM-DD" es una fecha sin hora — leerla con new Date(str) y
+// toLocaleDateString() la corre un día en zonas detrás de UTC (ej.
+// Argentina). Armar la fecha en hora local evita ese desfasaje.
+function fechaLocal(fecha) {
+    const [y, m, d] = String(fecha).split("-").map(Number);
+    return y && m && d ? new Date(y, m - 1, d) : null;
+}
+
+function formatearFecha(fecha) {
+    const d = fechaLocal(fecha);
+    return d ? d.toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" }) : fecha;
+}
+
+function fechaHoyISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Etiqueta por defecto de un adjunto cuando no se escribe una a mano
+ *  — pedido explícito del usuario: en vez de un genérico "Ver enlace",
+ *  mejor fecha y hora, así es más fácil de ubicar después. SIN quién
+ *  lo subió — ese dato es una referencia para el propio usuario al
+ *  buscar en Drive (privado), no algo para mostrarle a quien lee la
+ *  News. */
+function etiquetaAdjuntoPorDefecto() {
+    // Formateo manual (no toLocaleDateString) — en algunos navegadores
+    // "es-AR" con day/month "2-digit" no rellena con cero (ej. "6/8" en
+    // vez de "06/08"); esto es consistente en cualquier dispositivo.
+    const ahora = new Date();
+    const dd = String(ahora.getDate()).padStart(2, "0");
+    const mm = String(ahora.getMonth() + 1).padStart(2, "0");
+    const hh = String(ahora.getHours()).padStart(2, "0");
+    const min = String(ahora.getMinutes()).padStart(2, "0");
+    return `Adjunto ${dd}/${mm} · ${hh}:${min}`;
+}
+
+/** "Hoy" / "Ayer" / la fecha larga — mismo criterio de agrupado del mockup. */
+function etiquetaGrupo(fecha) {
+    const d = fechaLocal(fecha);
+    if (!d) return fecha;
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const diffDias = Math.round((hoy - d) / 86400000);
+    if (diffDias === 0) return "Hoy";
+    if (diffDias === 1) return "Ayer";
+    return formatearFecha(fecha);
+}
+
+/** Una fila de enlace/archivo adjunto — mismo diseño suave que Manuales
+ *  (ver .fs-archivo en components.css). Las clases input-adjunto-* y
+ *  .adjunto-item son las que lee leerCamposNotificacion(). */
+function filaAdjuntoHtml({ url = "", label = "" } = {}) {
+    return `
+        <div class="adjunto-item fs-archivo">
+            <span class="fs-archivo-ico">${Icon("documento", { size: 18 })}</span>
+            <div class="fs-archivo-campos">
+                <input type="text" class="input-adjunto-label fs-in-label" placeholder="Nombre del botón — ej. Caballetes" value="${escaparHtml(label)}" aria-label="Nombre del botón">
+                <input type="text" class="input-adjunto-url fs-in-url" placeholder="https://drive.google.com/..." value="${escaparHtml(url)}" aria-label="Link o archivo">
+            </div>
+            <button type="button" class="fs-x btn-eliminar-adjunto" aria-label="Quitar">×</button>
+        </div>
+    `;
+}
+
+function camposNotificacionHtml(n = {}, cursos = [], usuario = {}, sucursales = []) {
+    const opcionesCursos = cursos.map((c) => `<option value="${c.id}"${String(n.enlace) === String(c.id) ? " selected" : ""}>${c.nombre}</option>`).join("");
+    const opcionesPrioridad = PRIORIDADES.map((p) => `<option value="${p.id}"${(n.prioridad || "info") === p.id ? " selected" : ""}>${p.nombre}</option>`).join("");
+    const esNoticiaNueva = !n.id;
+    const dirigidoActual = esNoticiaNueva ? (n.dirigidoA || "paises") : (n.dirigidoA || "");
+
+    // Países disponibles: salen de Sucursales.pais, NO de una lista fija
+    // en el código — mismo criterio que ya usa Locales para sus pills
+    // (js/pages/locales.js). Si mañana abre un país nuevo, aparece solo,
+    // sin tocar este archivo. Argentina primero siempre (es el país
+    // operativo) y PRE-TILDADA en una News nueva — pero es un pill
+    // como cualquier otro: se puede destildar (ej. para armar una News
+    // de "todos menos Argentina").
+    const paisesDisponibles = [...new Set(sucursales.map((s) => s.pais).filter(Boolean))]
+        .sort((a, b) => a === "Argentina" ? -1 : b === "Argentina" ? 1 : a.localeCompare(b));
+    const paisesElegidos = esNoticiaNueva
+        ? (n.paisesA ? n.paisesA.split(",").map((p) => p.trim()).filter(Boolean) : ["Argentina"])
+        : (n.paisesA ? n.paisesA.split(",").map((p) => p.trim()).filter(Boolean) : []);
+    const tipoActual = n.tipo && n.tipo !== "noticia" ? n.tipo : "";
+    const opcionesCategoria = categoriasRecordadas().map((c) => `<option value="${c}"></option>`).join("");
+    const esAdmin = usuario.rol === "admin";
+
+    // Pills de categoría ya usadas — click rellena el input; cada una
+    // tiene un × para borrarla de la lista (pedido del usuario).
+    const pillsCategoria = categoriasRecordadas().map((c) => `
+        <span class="pill-categoria-wrap">
+            <button type="button" class="pill-categoria${tipoActual.toLowerCase() === c.toLowerCase() ? " activa" : ""}" data-pill-categoria="${c}">${c}</button>
+            <button type="button" class="pill-cat-borrar" data-borrar-categoria="${c}" aria-label="Borrar ${c}" title="Borrar etiqueta">×</button>
+        </span>
+    `).join("");
+
+    // Descripción de cada público objetivo, para la radio-card (ver
+    // DIRIGIDO_A en data/noticias.js). News es solo para colaboradores;
+    // Supervisión + Admin siempre reciben copia (no son opción).
+    const DESC_DIRIGIDO = {
+        "paises": "Elegí los países y, si hace falta, excluí algún local.",
+        "": "A todos los colaboradores de la red.",
+        "encargados-propios": "Solo responsables de locales propios.",
+        "encargados-franquicias": "Solo responsables de franquicias.",
+        "colaboradores-local": "Elegí a qué locales enviarla.",
+        "usuarios-especificos": "Solo a las personas que elijas.",
+        "solo-admin": "No le llega a nadie: solo la ves vos, para probar.",
+    };
+    const radiosDirigido = DIRIGIDO_A.map((d) => {
+        // "usuarios-especificos" y "solo-admin" (prueba personal) solo
+        // visibles para Admin — pedido explícito del usuario: Supervisor
+        // solo debe ver Colaboradores/Encargados propios/Encargados
+        // franquicias/Locales específicos.
+        if ((d.id === "usuarios-especificos" || d.id === "solo-admin") && !esAdmin) return "";
+        // Antes cada opción era una tarjeta con su descripción larga: seis
+        // párrafos a la vez. Ahora son pastillas y se explica SOLO la
+        // elegida, en una línea (ver #ayuda-dirigido).
+        return `
+            <label class="radio-pill">
+                <input type="radio" name="dirigido-a" class="input-dirigido-a" value="${d.id}" data-desc="${escaparHtml(DESC_DIRIGIDO[d.id] || "")}" ${dirigidoActual === d.id ? "checked" : ""}>
+                <span>${d.nombre}</span>
+            </label>
+        `;
+    }).join("");
+
+    return `
+        <div class="form-secciones">
+
+            <div class="form-seccion">
+                <div class="form-seccion-head">
+                    <span class="form-seccion-ico">${Icon("reportes", { size: 18 })}</span>
+                    <h3>Qué querés contar</h3>
+                </div>
+
+                <div class="form-cols-2">
+                    <div class="form-col">
+                        <label for="input-titulo">Título</label>
+                        <input type="text" id="input-titulo" placeholder="Ej: Nuevo curso disponible" value="${n.titulo || ""}">
+
+                        <label for="input-mensaje">Descripción</label>
+                        <textarea id="input-mensaje" rows="6" placeholder="Contá de qué se trata esta novedad...">${n.resumen || ""}</textarea>
+                    </div>
+
+                    <div class="form-col">
+                        <label for="input-tipo">Categoría</label>
+                        <input type="text" id="input-tipo" list="lista-categorias" placeholder="Escribí una categoría (ej: Novedad)" value="${tipoActual}">
+                        <datalist id="lista-categorias">${opcionesCategoria}</datalist>
+                        <div class="galeria-pills" style="margin-top:8px;margin-bottom:0">${pillsCategoria}</div>
+
+                        <label for="input-prioridad">Prioridad</label>
+                        <select id="input-prioridad">${opcionesPrioridad}</select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-seccion">
+                <div class="form-seccion-head">
+                    <span class="form-seccion-ico">${Icon("compartir", { size: 18 })}</span>
+                    <h3>A quién le llega</h3>
+                </div>
+                <div class="radio-pills">${radiosDirigido}</div>
+                <p class="fs-ayuda" id="ayuda-dirigido"></p>
+
+                <div id="wrap-sucursal-notif" class="form-section-collapsible hidden" style="margin-top:14px">
+                    <label for="input-sucursal-notif" style="margin-top:0">Seleccionar locales</label>
+                    ${MultiSelectSucursales("input-sucursal-notif", n.sucursal ? n.sucursal.split(",").map((s) => s.trim()).filter(Boolean) : [])}
+                </div>
+
+                <div id="wrap-usuarios-notif" class="form-section-collapsible hidden" style="margin-top:14px">
+                    <label for="input-usuarios-notif" style="margin-top:0">Seleccionar usuarios</label>
+                    ${MultiSelectUsuarios("input-usuarios-notif", n.usuariosEspecificos ? n.usuariosEspecificos.split(",").map((id) => id.trim()).filter(Boolean) : [])}
+                </div>
+
+                <div id="wrap-paises-notif" class="form-section-collapsible hidden" style="margin-top:14px">
+                    <label style="margin-top:0">Países</label>
+                    <div class="galeria-pills" id="pills-paises-notif">
+                        ${paisesDisponibles.map((p) => `<button type="button" class="pill-categoria${paisesElegidos.includes(p) ? " activa" : ""}" data-pill-pais="${escaparHtml(p)}">${escaparHtml(p)}</button>`).join("")}
+                    </div>
+                    <p class="fs-ayuda">Argentina viene tildada. Destildala si esta News no es para acá.</p>
+                </div>
+
+                <div id="wrap-noaplica-notif" class="form-section-collapsible hidden" style="margin-top:14px">
+                    <label for="input-noaplica-notif" style="margin-top:0">Locales que NO la reciben <span class="text-xs text-muted" style="font-weight:400">(opcional)</span></label>
+                    ${MultiSelectSucursales("input-noaplica-notif", n.noAplicaA ? n.noAplicaA.split(",").map((s) => s.trim()).filter(Boolean) : [])}
+                    <p class="fs-ayuda">Para un local puntual al que no le sirve el aviso.</p>
+                </div>
+
+                <p class="fs-ayuda">Se publica al instante. Supervisión siempre recibe copia.</p>
+            </div>
+
+            <div class="form-seccion">
+                <details open>
+                    <summary>
+                        <div class="form-seccion-head" style="margin-bottom:0">
+                            <span class="form-seccion-ico">${Icon("configuracion", { size: 18 })}</span>
+                            <h3>Extras <span class="text-xs text-muted" style="font-weight:400">(opcional)</span></h3>
+                            <span class="chevron">${Icon("flecha-der", { size: 16 })}</span>
+                        </div>
+                    </summary>
+                    <div style="margin-top:16px">
+                        <div class="form-avanzadas-3">
+                            <div>
+                                <label for="input-enlace" style="margin-top:0">Curso relacionado</label>
+                                <select id="input-enlace">
+                                    <option value="">Ninguno</option>
+                                    ${opcionesCursos}
+                                </select>
+
+                                <label class="toggle-switch" style="margin-top:16px">
+                                    Fijar como importante
+                                    <input type="checkbox" id="input-destacado-news" ${n.destacado ? "checked" : ""}>
+                                </label>
+                                <p class="fs-ayuda">Queda arriba de todo hasta que la desfijes.</p>
+                            </div>
+                            <div id="container-adjuntos">
+                                <label style="margin-top:0">Archivos o links <span class="mod-tooltip" data-tooltip-texto="Sin nombre de botón, se guarda con fecha y hora. El archivo queda en Drive (privado) ordenado por fecha.">ⓘ</span></label>
+                                <div id="lista-adjuntos" class="fs-archivos">
+                                    ${(n.adjuntos && n.adjuntos.length > 0)
+                                        ? n.adjuntos.map((a) => filaAdjuntoHtml(a)).join("")
+                                        : (n.adjuntoUrl ? filaAdjuntoHtml({ url: n.adjuntoUrl, label: n.adjuntoLabel || "Ver adjunto" }) : "")
+                                    }
+                                </div>
+                                <input type="file" id="input-archivo-adjunto" accept=".pdf,.xlsx,.xls,.doc,.docx,.ppt,.pptx,.csv,.txt,.zip,.jpg,.jpeg,.png,.gif,.mp4,.webm" style="display:none">
+                                <button type="button" id="btn-subir-archivo" class="fs-drop">
+                                    ${Icon("subir", { size: 22 })}
+                                    <span><span class="fs-drop-titulo">Subir archivo</span><small>PDF, Excel, Word, imágenes o video. Se guarda en Drive solo.</small></span>
+                                </button>
+                                <button type="button" id="btn-agregar-adjunto" class="fs-link">o pegar un link</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </details>
+            </div>
+
+        </div>
+    `;
+}
+
+function leerCamposNotificacion() {
+    const dirigidoA = document.querySelector(".input-dirigido-a:checked")?.value || "";
+    const tipo = document.getElementById("input-tipo").value.trim() || "noticia";
+    return {
+        titulo: document.getElementById("input-titulo").value.trim(),
+        resumen: document.getElementById("input-mensaje").value.trim(),
+        tipo,
+        prioridad: document.getElementById("input-prioridad").value,
+        // "Programar publicación" se sacó (pedido explícito del
+        // usuario) — sin un trigger de backend que mande el push ni
+        // avise cuando se publica sola, quedaba una fecha futura
+        // "muda": la noticia aparecía igual ese día, pero nadie se
+        // enteraba. Todo se publica al momento, siempre hoy.
+        fecha: fechaHoyISO(),
+        dirigidoA,
+        // Los locales solo importan cuando se eligió ese modo.
+        sucursal: dirigidoA === "colaboradores-local" ? document.getElementById("input-sucursal-notif").value.trim() : "",
+        // Usuarios específicos: solo cuando se elige esa opción
+        usuariosEspecificos: dirigidoA === "usuarios-especificos" ? (document.getElementById("input-usuarios-notif")?.value || "") : "",
+        // Países y locales excluidos: solo tienen sentido dentro de "País(es)"
+        paisesA: dirigidoA === "paises" ? [...document.querySelectorAll("#pills-paises-notif .pill-categoria.activa")].map((p) => p.dataset.pillPais).join(",") : "",
+        noAplicaA: dirigidoA === "paises" ? (document.getElementById("input-noaplica-notif")?.value.trim() || "") : "",
+        detalle: "", // Eliminado — solo se usa resumen
+        enlace: document.getElementById("input-enlace").value,
+        destacado: document.getElementById("input-destacado-news")?.checked || false,
+
+        // adjuntos múltiples: lee campos dinámicos
+        adjuntos: (() => {
+            const adjuntos = [];
+            document.querySelectorAll(".adjunto-item").forEach((item) => {
+                const url = item.querySelector(".input-adjunto-url")?.value.trim() || "";
+                const label = item.querySelector(".input-adjunto-label")?.value.trim() || etiquetaAdjuntoPorDefecto();
+                if (url) adjuntos.push({ url, label });
+            });
+            return adjuntos;
+        })(),
+    };
+}
+
+function filaNotificacion(n, usuario, leida) {
+    const info = tipoInfo(n.tipo);
+    const prio = prioridadInfo(n.prioridad);
+    const esAdmin = usuario.rol === "admin";
+    const fijadaPersonal = estaFijadaPersonal(n, usuario.id);
+    // Swipe estilo Gmail, bidireccional:
+    //   → deslizar a la DERECHA revela "Leída"/"No leída" (para
+    //     cualquiera), panel celeste con ✓, pegado al borde izquierdo.
+    //   → deslizar a la IZQUIERDA revela "Fijar"/"Quitar" (para
+    //     cualquiera) y, solo para Admin, además "Eliminar" — panel
+    //     rojo pegado al borde derecho. El pin personal vivía antes
+    //     como botón aparte flotando sobre el texto de la fila; ahora
+    //     es una acción de swipe más, mismo lenguaje que el resto.
+    // Ver bindSwipeNotif() más abajo. .notif-swipe-content es la fila
+    // real; los ".notif-swipe-actions-*" quedan ocultos detrás hasta
+    // que se desliza en su dirección correspondiente.
+    return `
+        <div class="notif-swipe-row" data-swipe-id="${n.id}">
+            <div class="notif-swipe-actions notif-swipe-actions-izq">
+                <button type="button" class="notif-swipe-btn notif-swipe-toggle" data-swipe-toggle-leida="${n.id}">${Icon("check", { size: 18 })}<span>${leida ? "No leída" : "Leída"}</span></button>
+            </div>
+            <div class="notif-swipe-actions notif-swipe-actions-der">
+                <button type="button" class="notif-swipe-btn notif-swipe-pin" data-swipe-toggle-pin="${n.id}">${Icon("pin", { size: 18 })}<span>${fijadaPersonal ? "Quitar" : "Fijar"}</span></button>
+                ${esAdmin ? `<button type="button" class="notif-swipe-btn notif-swipe-delete" data-swipe-eliminar="${n.id}">${Icon("tacho", { size: 18 })}<span>Eliminar</span></button>` : ""}
+            </div>
+            <div class="notif-item notif-swipe-content${leida ? "" : " no-leida"}" role="button" tabindex="0" data-ver-notif="${n.id}">
+                <span class="notif-item-icono" style="background:${prio.color}22;color:${prio.color}">${Icon(info.icono, { size: 18 })}</span>
+                <span class="notif-item-body">
+                    <span class="notif-item-titulo">${n.destacado ? `<span class="notif-item-fijada" title="Fijada por Administración">${Icon("trofeo", { size: 13 })}</span>` : ""}${fijadaPersonal ? `<span class="notif-item-fijada-personal" title="Fijada por vos">${Icon("pin", { size: 12 })}</span>` : ""}${n.titulo}${!leida ? '<i class="notif-dot"></i>' : ""}</span>
+                </span>
+                <span class="notif-item-fecha">${etiquetaGrupo(n.fecha) === "Hoy" || etiquetaGrupo(n.fecha) === "Ayer" ? etiquetaGrupo(n.fecha) : formatearFecha(n.fecha).split(" de ")[0] + " " + formatearFecha(n.fecha).split(" de ")[1].slice(0, 3)}</span>
+            </div>
+        </div>
+    `;
+}
+
+/** Swipe estilo Gmail sobre cada fila de News, bidireccional: deslizar
+ *  a la DERECHA revela "Leída"/"No leída" (para cualquiera, panel
+ *  celeste a la izquierda); deslizar a la IZQUIERDA revela "Fijar"/
+ *  "Quitar" (para cualquiera) y, solo para Admin, además "Eliminar" —
+ *  panel rojo a la derecha. Ver .notif-swipe-* en css/components.css
+ *  y la estructura armada en filaNotificacion().
+ *  Sin librería — seguimiento de touch con transform, para una sola
+ *  fila a la vez (nunca hace falta animar más de una).
+ *
+ *  Los flags _arrastrando/_swipeAbierta viven directo en el elemento
+ *  (no en una variable del módulo) para que el handler de
+ *  "[data-ver-notif]" — ya registrado antes, en bindNews() — pueda
+ *  chequearlos y saber si el click que le llegó fue en realidad el
+ *  final de un gesto de swipe, sin competir por el mismo evento con
+ *  un segundo listener aparte. */
+/** Refleja "marcada como leída" en el DOM que ya está armado, sin
+ *  pedir "Noticias" de nuevo ni reconstruir la página — pedido
+ *  explícito (2026-09-02): "se recarga toda la página y tarda mucho".
+ *  Causa real: actualizarNoticia() (dataSource.js, updateSheet) ya
+ *  invalida el caché de Noticias sola apenas escribe, así que el
+ *  navigate("news") de después SIEMPRE terminaba pegándole de nuevo a
+ *  Apps Script (~1-2s) solo para volver a mostrar algo que ya sabíamos
+ *  — la escritura recién awaited ya la confirmó. Acá alcanza con lo
+ *  que YA está en el DOM: sacar el punto de no-leída, la clase, y la
+ *  fila del panel "No leídas" (ahí si no aparece más, a diferencia de
+ *  "Todas" donde se queda con el estilo actualizado). Solo cubre
+ *  marcar COMO leída (el camino común) — desmarcar sigue con el
+ *  recargado de siempre, es la acción de deshacer, no hace falta que
+ *  sea instantánea. */
+function actualizarNewsSinRecargar(notiId) {
+    document.querySelectorAll(`.notif-swipe-row[data-swipe-id="${notiId}"]`).forEach((fila) => {
+        const panel = fila.closest("[data-panel]");
+        if (panel?.dataset.panel === "no-leidas") {
+            fila.remove();
+            return;
+        }
+        const contenido = fila.querySelector(".notif-swipe-content");
+        contenido?.classList.remove("no-leida");
+        contenido?.querySelector(".notif-dot")?.remove();
+        const toggleBtn = fila.querySelector("[data-swipe-toggle-leida] span");
+        if (toggleBtn) toggleBtn.textContent = "No leída";
+    });
+    const tab = document.querySelector('[data-tab="no-leidas"]');
+    if (tab) {
+        const restantes = document.querySelectorAll('[data-panel="no-leidas"] .notif-swipe-row').length;
+        tab.textContent = `No leídas${restantes ? ` (${restantes})` : ""}`;
+    }
+}
+
+function bindSwipeNotif() {
+    document.querySelectorAll(".notif-swipe-row").forEach((fila) => {
+        const contenido = fila.querySelector(".notif-swipe-content");
+        const accionesIzq = fila.querySelector(".notif-swipe-actions-izq"); // revelado deslizando a la derecha
+        const accionesDer = fila.querySelector(".notif-swipe-actions-der"); // revelado deslizando a la izquierda
+        if (!contenido) return;
+
+        let startX = 0;
+        let startY = 0;
+        let esHorizontal = null;
+        contenido._swipeAbierta = false;
+        contenido._arrastrando = false;
+
+        const maxDer = () => accionesIzq ? Math.min(accionesIzq.scrollWidth || 90, 160) : 0; // cuánto puede correrse hacia la derecha
+        // Tope más alto que maxDer: este lado ahora puede tener 2
+        // botones juntos (Fijar + Eliminar, solo Admin) en vez de 1.
+        const maxIzq = () => accionesDer ? Math.min(accionesDer.scrollWidth || 90, 230) : 0; // cuánto puede correrse hacia la izquierda
+
+        function cerrar() {
+            contenido.style.transform = "";
+            contenido._swipeAbierta = false;
+        }
+
+        function abrirDer() {
+            contenido.style.transform = `translateX(${maxDer()}px)`;
+            contenido._swipeAbierta = "der"; // el panel IZQUIERDO quedó a la vista
+        }
+
+        function abrirIzq() {
+            contenido.style.transform = `translateX(-${maxIzq()}px)`;
+            contenido._swipeAbierta = "izq"; // el panel DERECHO quedó a la vista
+        }
+
+        // Pointer Events (no Touch Events): una sola API cubre dedo,
+        // mouse y trackpad — así el swipe se puede probar arrastrando
+        // con el mouse en Mac/desktop, no solo en un celular real.
+        let pointerId = null;
+
+        contenido.addEventListener("pointerdown", (e) => {
+            if (e.button !== undefined && e.button !== 0) return; // solo click izquierdo / touch / pen
+            // Cerrar cualquier otra fila que haya quedado abierta antes
+            // de empezar un gesto nuevo — solo una a la vez.
+            document.querySelectorAll(".notif-swipe-content").forEach((c) => {
+                if (c !== contenido && c._swipeAbierta) { c.style.transform = ""; c._swipeAbierta = false; }
+            });
+            pointerId = e.pointerId;
+            contenido.setPointerCapture(pointerId);
+            startX = e.clientX;
+            startY = e.clientY;
+            esHorizontal = null;
+            contenido._arrastrando = false;
+        });
+
+        contenido.addEventListener("pointermove", (e) => {
+            if (e.pointerId !== pointerId) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            // Antes esto se decidía con el primerísimo evento de
+            // pointermove, sin importar cuán chico fuera el movimiento —
+            // un arrastre real (mouse o dedo) casi siempre arranca con
+            // algo de "temblor" vertical de un par de píxeles antes de
+            // asentarse en la dirección real, y esos primeros píxeles
+            // bastaban para trabar esHorizontal en false para todo el
+            // gesto (reportado: "lo detecta como click" — nunca llegaba
+            // a abrirse el panel). Ahora espera a que el movimiento total
+            // supere un mínimo (8px) antes de decidir, usando la
+            // proporción acumulada hasta ese punto en vez de la del
+            // primer instante.
+            if (esHorizontal === null) {
+                if (Math.hypot(dx, dy) < 8) return;
+                esHorizontal = Math.abs(dx) > Math.abs(dy);
+            }
+            if (!esHorizontal) return;
+            e.preventDefault(); // el gesto es horizontal — no dejar que la página scrollee vertical mientras tanto (touch) ni seleccionar texto (mouse)
+            contenido._arrastrando = true;
+            contenido.classList.add("notif-swipe-arrastrando");
+            const base = contenido._swipeAbierta === "der" ? maxDer() : contenido._swipeAbierta === "izq" ? -maxIzq() : 0;
+            const x = Math.max(-maxIzq(), Math.min(maxDer(), base + dx));
+            contenido.style.transform = `translateX(${x}px)`;
+        });
+
+        const soltar = (e) => {
+            if (e.pointerId !== pointerId) return;
+            pointerId = null;
+            contenido.classList.remove("notif-swipe-arrastrando");
+            if (!esHorizontal) return;
+            const actual = new DOMMatrix(getComputedStyle(contenido).transform).m41;
+            if (actual > maxDer() / 3 && maxDer() > 0) abrirDer();
+            else if (actual < -maxIzq() / 3 && maxIzq() > 0) abrirIzq();
+            else cerrar();
+            // El click sintético que dispara el navegador tras soltar
+            // todavía ve _arrastrando en true en ese instante (el
+            // handler de [data-ver-notif] lo chequea) — recién se
+            // limpia después, para no reabrir el detalle por el mismo
+            // gesto que acaba de abrir/cerrar las acciones.
+            setTimeout(() => { contenido._arrastrando = false; }, 50);
+
+            // Si el arrastre terminó justo sobre uno de los botones recién
+            // revelados (un solo gesto continuo: deslizar y soltar ahí
+            // mismo, sin un segundo toque separado) el navegador NO
+            // dispara "click" — hubo demasiado movimiento para contar
+            // como toque. Reportado en vivo: el panel se abría bien pero
+            // la acción nunca corría, en silencio total. Si soltás sobre
+            // un botón, se ejecuta directo acá, sin depender de ese click
+            // sintético que nunca llega.
+            const objetivo = document.elementFromPoint(e.clientX, e.clientY);
+            const btnAccion = objetivo?.closest(".notif-swipe-btn");
+            if (btnAccion) btnAccion.click();
+        };
+        contenido.addEventListener("pointerup", soltar);
+        contenido.addEventListener("pointercancel", soltar);
+    });
+
+    document.querySelectorAll("[data-swipe-toggle-leida]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const usuario = getUsuarioActual();
+            const items = await getNoticias();
+            const noti = items.find((n) => String(n.id) === String(btn.dataset.swipeToggleLeida));
+            if (!noti) return;
+            if (estaLeida(noti, usuario.id)) {
+                await marcarNotificacionNoLeida(noti, usuario.id);
+                navigate("news"); // desmarcar es la acción de deshacer, no hace falta que sea instantánea
+            } else {
+                await marcarNotificacionLeida(noti, usuario.id);
+                decrementarContadorCampana(1);
+                actualizarNewsSinRecargar(noti.id);
+            }
+        });
+    });
+
+    document.querySelectorAll("[data-swipe-eliminar]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            if (!confirm("¿Eliminar esta News? No se puede deshacer.")) return;
+            await eliminarNoticia(btn.dataset.swipeEliminar);
+            navigate("news");
+        });
+    });
+
+    document.querySelectorAll("[data-swipe-toggle-pin]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const usuario = getUsuarioActual();
+            const items = await getNoticias();
+            const noti = items.find((n) => String(n.id) === String(btn.dataset.swipeTogglePin));
+            if (!noti) return;
+            await toggleFijadaPersonal(noti, usuario.id);
+            navigate("news");
+        });
+    });
+}
+
+export async function News() {
+
+    const usuario = getUsuarioActual();
+    const esAdmin = usuario.rol === "admin";
+    const puedeCrear = puedeCrearNoticia(usuario);
+    const [items, cursos] = await Promise.all([getNoticiasVisibles(usuario), getCursos()]);
+
+    const noLeidas = items.filter((n) => !estaLeida(n, usuario.id));
+
+    // Agrupado "Hoy / Ayer / fecha larga" preservando el orden ya
+    // ordenado (más reciente primero) que devuelve getNoticias().
+    function agrupar(lista) {
+        const grupos = [];
+        let grupoActual = null;
+        lista.forEach((n) => {
+            const etiqueta = etiquetaGrupo(n.fecha);
+            if (!grupoActual || grupoActual.etiqueta !== etiqueta) {
+                grupoActual = { etiqueta, items: [] };
+                grupos.push(grupoActual);
+            }
+            grupoActual.items.push(n);
+        });
+        return grupos;
+    }
+
+    // Las fijadas van en su propia sección arriba de todo, sin
+    // agrupar por fecha (esa es justo la idea de fijar: no perderse
+    // entre el resto por antigua que sea) — el resto sigue el
+    // agrupado Hoy/Ayer/fecha de siempre.
+    // Una News queda en "Fijadas" si Administración la marcó como
+    // destacada (global, la ven todos ahí) O si el usuario la fijó
+    // para sí mismo (personal, solo él la ve en esa sección).
+    function separarFijadas(lista) {
+        const esFijada = (n) => n.destacado || estaFijadaPersonal(n, usuario.id);
+        return { fijadas: lista.filter(esFijada), resto: lista.filter((n) => !esFijada(n)) };
+    }
+
+    const { fijadas: fijadasTodas, resto: restoTodas } = separarFijadas(items);
+    const { fijadas: fijadasNoLeidas, resto: restoNoLeidas } = separarFijadas(noLeidas);
+
+    const gruposTodas = agrupar(restoTodas);
+    const gruposNoLeidas = agrupar(restoNoLeidas);
+
+    const fijadasHtml = (lista) => lista.length ? `
+        <div class="notif-grupo">
+            <h4>📌 Fijadas</h4>
+            <div class="notif-lista">${lista.map((n) => filaNotificacion(n, usuario, estaLeida(n, usuario.id))).join("")}</div>
+        </div>
+    ` : "";
+
+    const listaHtml = (grupos, fijadas) => (fijadas.length || grupos.length)
+        ? fijadasHtml(fijadas) + grupos.map((g) => `
+            <div class="notif-grupo">
+                <h4>${g.etiqueta}</h4>
+                <div class="notif-lista">${g.items.map((n) => filaNotificacion(n, usuario, estaLeida(n, usuario.id))).join("")}</div>
+            </div>
+        `).join("")
+        : `<p class="text-sm text-muted" style="padding:24px 4px">No hay notificaciones acá.</p>`;
+
+    return `
+        <div class="pagina-suave">
+        ${Header("News", "Novedades, recordatorios y avisos de tu cuenta")}
+
+        <div class="table-toolbar">
+            <div class="notif-tabs">
+                <button class="notif-tab active" data-tab="todas">Todas</button>
+                <button class="notif-tab" data-tab="no-leidas">No leídas${noLeidas.length ? ` (${noLeidas.length})` : ""}</button>
+            </div>
+            <span style="display:flex;gap:10px;flex-wrap:wrap">
+                ${noLeidas.length ? `<button class="btn btn-secondary" id="btn-marcar-todas">Marcar todas como leídas</button>` : ""}
+                ${puedeCrear ? `<button class="btn btn-primary" id="btn-nueva-notif">+ Nueva News</button>` : ""}
+            </span>
+        </div>
+
+        <div class="form-info-box aviso-deslizar" style="margin-top:14px">
+            ${Icon("idea", { size: 16 })}
+            <p>Deslizá una noticia hacia la derecha para marcarla leída, o hacia la izquierda para fijarla en tu lista personal${esAdmin ? " o eliminarla" : ""} — fijar no afecta lo que ven los demás.</p>
+        </div>
+
+        <div class="section" data-panel="todas">${listaHtml(gruposTodas, fijadasTodas)}</div>
+        <div class="section" data-panel="no-leidas" hidden>${listaHtml(gruposNoLeidas, fijadasNoLeidas)}</div>
+        </div>
+    `;
+}
+
+export function bindNews() {
+
+    const usuario = getUsuarioActual();
+
+    // Tabs Todas / No leídas — mismo patrón simple que otros toggles
+    // de la app (mostrar/ocultar paneles ya renderizados, sin re-pedir
+    // datos al servidor).
+    document.querySelectorAll(".notif-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+            document.querySelectorAll(".notif-tab").forEach((t) => t.classList.remove("active"));
+            tab.classList.add("active");
+            document.querySelectorAll("[data-panel]").forEach((p) => {
+                p.hidden = p.dataset.panel !== tab.dataset.tab;
+            });
+        });
+    });
+
+    document.querySelectorAll("[data-ver-notif]").forEach((btn) => {
+        const abrir = async () => {
+            // Si el toque fue en realidad un gesto de deslizar (swipe,
+            // ver bindSwipeNotif() más abajo) o la fila ya estaba abierta
+            // mostrando sus acciones, ese mismo toque la cierra en vez de
+            // abrir el detalle — evita que "cerrar el swipe" y "abrir la
+            // notificación" compitan por el mismo click.
+            if (btn._arrastrando || btn._swipeAbierta) return;
+            const items = await getNoticias();
+            const noti = items.find((n) => String(n.id) === String(btn.dataset.verNotif));
+            if (noti) await abrirDetalleNotificacion(noti, usuario);
+        };
+        btn.addEventListener("click", abrir);
+        // .notif-swipe-content pasó de <button> a <div rol="button"> (un
+        // <button> real no puede contener el <button> del pin adentro) —
+        // sin esto, Enter/Espacio con teclado dejaban de abrir el detalle.
+        btn.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); }
+        });
+    });
+
+    bindSwipeNotif();
+
+    const btnMarcarTodas = document.getElementById("btn-marcar-todas");
+    if (btnMarcarTodas) {
+        btnMarcarTodas.addEventListener("click", async () => {
+            if (btnMarcarTodas.disabled) return;
+            const textoOriginal = btnMarcarTodas.textContent;
+            btnMarcarTodas.disabled = true;
+            btnMarcarTodas.textContent = "Marcando...";
+
+            try {
+                const items = await getNoticiasVisibles(usuario);
+                const noLeidas = items.filter((n) => !estaLeida(n, usuario.id));
+                // allSettled, no all — reportado en vivo por el usuario
+                // en Android real: "marcar todas no hace nada". Causa:
+                // Promise.all aborta TODO apenas UNA de las N escrituras
+                // en paralelo falla (timeout, conexión real inestable),
+                // sin aviso ni forma de recuperarse. Con allSettled, las
+                // que sí funcionaron quedan guardadas y se le avisa a la
+                // persona si alguna falló, en vez de silencio total.
+                const resultados = await Promise.allSettled(noLeidas.map((n) => marcarNotificacionLeida(n, usuario.id)));
+                const fallidas = resultados.filter((r) => r.status === "rejected").length;
+                const exitosas = resultados.length - fallidas;
+
+                if (exitosas) decrementarContadorCampana(exitosas);
+                if (fallidas) {
+                    alert(`Se marcaron ${exitosas} de ${resultados.length} — ${fallidas} no se pudieron guardar. Probá de nuevo en un momento.`);
+                }
+                navigate("news");
+            } catch (err) {
+                alert(err.message || "No se pudo marcar todas como leídas. Probá de nuevo.");
+                btnMarcarTodas.disabled = false;
+                btnMarcarTodas.textContent = textoOriginal;
+            }
+        });
+    }
+
+    // Crear News: Admin + Supervisor (no capacitador). Ver puedeCrearNoticia.
+    if (puedeCrearNoticia(usuario)) {
+        const btnNueva = document.getElementById("btn-nueva-notif");
+        if (btnNueva) btnNueva.addEventListener("click", () => navigate("newsnueva"));
+    }
+
+    // Editar/eliminar una News ya publicada: solo Admin (moderación).
+    if (usuario.rol !== "admin") return;
+
+    document.querySelectorAll("[data-editar-notif]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            navigate(`newsnueva/${btn.dataset.editarNotif}`);
+        });
+    });
+
+    document.querySelectorAll("[data-eliminar-notif]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (!confirm("¿Eliminar esta notificación?")) return;
+            await eliminarNoticia(btn.dataset.eliminarNotif);
+            registrarEvento(usuario.id, "eliminar_noticia", `Notificación ${btn.dataset.eliminarNotif} eliminada`);
+            actualizarContadorCampana();
+            navigate("news");
+        });
+    });
+}
+
+/** Vista de detalle — mismo modal que "editar", en modo lectura, con
+ *  las acciones del mockup (Ir al curso, Ver adjunto, Marcar leída). */
+async function abrirDetalleNotificacion(noti, usuario) {
+    const modalId = "modal-detalle-notif";
+    const esAdmin = usuario.rol === "admin";
+    const gestiona = esAdmin || usuario.rol === "supervisor";
+    const leida = estaLeida(noti, usuario.id);
+    const info = tipoInfo(noti.tipo);
+
+    const destinatarios = gestiona ? await descripcionDestinatarios(noti) : "";
+
+    const contenidoHtml = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <span class="notif-item-icono" style="background:${prioridadInfo(noti.prioridad).color}22;color:${prioridadInfo(noti.prioridad).color}">${Icon(info.icono, { size: 18 })}</span>
+            <div>
+                <div class="text-xs text-muted">${info.nombre} · ${formatearFecha(noti.fecha)}</div>
+            </div>
+        </div>
+        <p class="text-sm" style="margin-top:0;margin-bottom:16px;white-space:pre-wrap;line-height:1.6">${escaparHtml(noti.resumen)}</p>
+        ${destinatarios ? bloqueDestinatarios(destinatarios) : ""}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+            ${noti.enlace ? `<a class="btn btn-primary" href="#/cursos/${noti.enlace}">Ir al curso</a>` : ""}
+            ${noti.adjuntos?.map(a => `<a class="btn btn-sutil" href="${a.url}">${a.label}</a>`).join("") || (noti.adjuntoUrl ? `<a class="btn btn-sutil" href="${noti.adjuntoUrl}">${noti.adjuntoLabel || "Ver adjunto"}</a>` : "")}
+            ${esAdmin ? `
+                <button class="btn btn-sutil" data-editar-notif="${noti.id}">Editar</button>
+                <button class="btn btn-sutil-danger" data-eliminar-notif="${noti.id}">Eliminar</button>
+            ` : ""}
+        </div>
+    `;
+
+    abrirModal(`
+        <div class="modal-overlay" id="${modalId}">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>${noti.titulo}</h2>
+                    <button class="modal-close" data-close="${modalId}">✕</button>
+                </div>
+                <div class="modal-body">${contenidoHtml}</div>
+                <div class="modal-footer">
+                    <button class="btn btn-sutil" data-close="${modalId}">Cerrar</button>
+                    ${leida ? "" : `<button class="btn btn-primary" data-confirm="${modalId}">Marcar como leída</button>`}
+                </div>
+            </div>
+        </div>
+    `, modalId, leida ? null : async () => {
+        try {
+            await marcarNotificacionLeida(noti, usuario.id);
+        } catch (err) {
+            // Antes esto quedaba en silencio — el try/finally de
+            // modal.js reactivaba el botón pero la persona no tenía
+            // forma de saber qué pasó (reportado en vivo: "se le
+            // tildaba y no podía darle marcado", real network timeout
+            // en un celular con señal intermitente, ver services/
+            // google.js). Ahora se lo decimos explícito.
+            alert(err.message || "No se pudo marcar como leída. Probá de nuevo.");
+            return;
+        }
+        // Ya sabemos que baja en 1 y que esta noticia quedó leída — no
+        // hace falta re-pedir "Noticias" ni reconstruir la página para
+        // confirmarlo (actualizarNoticia ya invalida el caché sola;
+        // pedirla nomás para volver a mostrar lo que ya sabemos era
+        // justo el "tarda mucho" reportado en vivo, 2026-09-02).
+        decrementarContadorCampana();
+        cerrarModal(modalId);
+        actualizarNewsSinRecargar(noti.id);
+    });
+
+    // Los botones Editar/Eliminar del detalle reusan el mismo binding
+    // que la lista — se conectan acá porque este modal se abre fuera
+    // del ciclo de render de la página.
+    if (usuario.rol === "admin") {
+        document.querySelector(`#${modalId} [data-editar-notif]`)?.addEventListener("click", () => {
+            cerrarModal(modalId);
+            navigate(`newsnueva/${noti.id}`);
+        });
+        document.querySelector(`#${modalId} [data-eliminar-notif]`)?.addEventListener("click", async () => {
+            if (!confirm("¿Eliminar esta notificación?")) return;
+            await eliminarNoticia(noti.id);
+            registrarEvento(usuario.id, "eliminar_noticia", `Notificación ${noti.id} eliminada`);
+            cerrarModal(modalId);
+            actualizarContadorCampana();
+            navigate("news");
+        });
+    }
+}
+
+/** Modal de resultado tras publicar — pedido explícito (2026-09-02):
+ *  "es importante saber si a las personas que se le envía News los
+ *  reciben". Un alert() con los nombres pegados en un párrafo se
+ *  probó y se frenó en el acto con captura real: "no tiene
+ *  coherencia esto si tengo 500 usuarios y hay 348 que no lo tienen".
+ *  Acá el número siempre se ve de un pantallazo (pill), y la lista
+ *  con nombres queda UN toque más allá — coherente con 18 o con 348,
+ *  nunca un bloque de texto ilegible. */
+function mostrarResultadoPushNews(resultado, onCerrar) {
+    const modalId = "modal-resultado-push-news";
+    // Los dos lados con el mismo trato — pedido explícito (2026-09-02,
+    // viendo el mismo patrón en Movimientos de gestión): "muestra si
+    // quienes tiene el push [también], no soy adivino". Ningún pill
+    // asume nada: los nombres de los dos lados están siempre a un
+    // toque, nunca hay que confiar en el número solo.
+    const pillLista = (clave, nombres, claseBadge, etiqueta) => nombres.length ? `
+        <button type="button" class="pill-expandible-toggle" data-toggle-lista="${clave}">
+            <span class="badge ${claseBadge}">${etiqueta}</span>
+            <span class="pill-expandible-chevron">${Icon("flecha-der", { size: 14 })}</span>
+        </button>
+    ` : "";
+    const listaOculta = (clave, nombres) => nombres.length
+        ? `<div class="pill-expandible-lista" data-lista="${clave}" hidden>${nombres.map((n) => `<div class="pill-expandible-item">${escaparHtml(n)}</div>`).join("")}</div>`
+        : "";
+    abrirModal(`
+        <div class="modal-overlay" id="${modalId}">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Resultado del push</h2>
+                    <button class="modal-close" data-close="${modalId}">✕</button>
+                </div>
+                <div class="modal-body" data-resultado-push>
+                    <p style="margin:0 0 14px">Enviado a <strong>${resultado.enviados}/${resultado.destinatarios}</strong> destinatarios.</p>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        ${pillLista("con-push", resultado.conPush, "badge-success", `${resultado.conPush.length} con push`)}
+                        ${pillLista("sin-push", resultado.sinPush, "badge-muted", `${resultado.sinPush.length} sin push`)}
+                    </div>
+                    ${listaOculta("con-push", resultado.conPush)}
+                    ${listaOculta("sin-push", resultado.sinPush)}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-close="${modalId}">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    `, modalId, null);
+    // abrirModal ya cierra el modal solo con estos mismos disparadores
+    // (los botones data-close y tocar el fondo) — acá se suma, además,
+    // avisarle a quien llamó (news.js navega a la lista recién cuando
+    // esto se cierra, no antes, para no dejarlo huérfano a mitad de
+    // camino).
+    if (onCerrar) {
+        const overlay = document.getElementById(modalId);
+        overlay?.querySelectorAll(`[data-close="${modalId}"]`).forEach((el) => el.addEventListener("click", onCerrar, { once: true }));
+        overlay?.addEventListener("click", (e) => { if (e.target === overlay) onCerrar(); }, { once: true });
+    }
+    document.querySelector(`#${modalId} [data-resultado-push]`)?.addEventListener("click", (e) => {
+        const toggle = e.target.closest("[data-toggle-lista]");
+        if (!toggle) return;
+        const clave = toggle.dataset.toggleLista;
+        const lista = document.querySelector(`#${modalId} [data-lista="${clave}"]`);
+        if (!lista) return;
+        lista.hidden = !lista.hidden;
+        toggle.classList.toggle("abierto", !lista.hidden);
+    });
+}
+
+/** Push real a quienes puedan ver esta noticia — mismo criterio que
+ *  puedeVerNoticia (campana/centro de avisos), así el destinatario del
+ *  push es exactamente el mismo público que después la ve en News. No
+ *  bloquea la creación si el envío falla (modo demo, red, un token
+ *  vencido) — la noticia ya quedó guardada de todas formas, un push
+ *  fallido no debería perder el contenido.
+ *
+ *  Devuelve {enviados, destinatarios, conPush, sinPush} — pedido
+ *  explícito (2026-09-02): "es importante saber si a las personas que
+ *  se le envía News los reciben", y después "muestra si quienes tiene
+ *  el push [también], no soy adivino" — los dos lados, no solo el que
+ *  falta. "sinPush"/"conPush" son sobre si la persona ALGUNA VEZ
+ *  activó push (tiene un token registrado, ver data/tokens.js) —
+ *  distinto de "fallidos" del backend (un token que SÍ existía pero
+ *  FCM lo rechazó); acá interesa lo primero, es lo que se puede
+ *  corregir pidiéndole a esa persona que lo active en Mi Perfil. */
+async function mandarPushDeNoticia(noticia, usuarios, sucursales) {
+    const destinatarios = usuarios.filter((u) => puedeVerNoticia(noticia, u, sucursales));
+    if (!destinatarios.length) return { enviados: 0, destinatarios: 0, conPush: [], sinPush: [] };
+    try {
+        const [resultado, tokens] = await Promise.all([
+            mandarPush(destinatarios.map((u) => u.id), noticia.titulo, noticia.resumen, "#/news"),
+            getTokens(),
+        ]);
+        const idsConToken = new Set(tokens.map((t) => String(t.usuarioId)));
+        const conPush = destinatarios.filter((u) => idsConToken.has(String(u.id))).map((u) => u.nombre);
+        const sinPush = destinatarios.filter((u) => !idsConToken.has(String(u.id))).map((u) => u.nombre);
+        return { enviados: resultado?.enviados ?? 0, destinatarios: destinatarios.length, conPush, sinPush };
+    } catch (err) {
+        console.warn("No se pudo mandar el push de la noticia:", err.message);
+        return { enviados: 0, destinatarios: destinatarios.length, conPush: [], sinPush: destinatarios.map((u) => u.nombre) };
+    }
+}
+
+/** Página completa "Nueva News" / "Editar News" (fiel a la captura del
+ *  usuario) — reemplaza el modal anterior: header con ícono + título,
+ *  las 4 secciones en tarjetas, y una barra de acciones abajo. Ruta
+ *  #/newsnueva (crear) o #/newsnueva/:id (editar). Solo Admin+Supervisor
+ *  (no capacitador) llegan acá — ver puedeCrearNoticia y el gate en el
+ *  router/botones. */
+export async function NuevaNews(params = []) {
+    const usuario = getUsuarioActual();
+    if (!puedeCrearNoticia(usuario)) return `<p class="text-sm text-muted" style="padding:24px">No tenés permiso para crear News.</p>`;
+
+    const id = params[0];
+    const [cursos, noticias, sucursales] = await Promise.all([getCursos(), id ? getNoticias() : Promise.resolve([]), getSucursales()]);
+    const noti = id ? noticias.find((n) => String(n.id) === String(id)) : null;
+
+    return `
+        <div class="compose-page-header">
+            <span class="compose-ico">${Icon("noticias", { size: 24 })}</span>
+            <h1>${noti ? "Editar News" : "Nueva News"}</h1>
+            <button type="button" class="compose-ayuda" id="btn-ayuda-news">${Icon("alertas", { size: 16 })} ¿Cómo funciona News?</button>
+        </div>
+
+        ${camposNotificacionHtml(noti || {}, cursos, usuario, sucursales)}
+
+        <div class="compose-footer">
+            <button class="btn btn-secondary" id="btn-cancelar-news">Cancelar</button>
+            <button class="btn btn-primary" id="btn-publicar-news">${noti ? "Guardar cambios" : "Publicar"}</button>
+        </div>
+    `;
+}
+
+export function bindNuevaNews(params = []) {
+    const id = params && params[0];
+
+    bindMultiSelectSucursales("input-sucursal-notif");
+    bindMultiSelectSucursales("input-noaplica-notif");
+
+    // Pills de categoría — click rellena el input y resalta la elegida.
+    const inputTipo = document.getElementById("input-tipo");
+    document.querySelectorAll("[data-pill-categoria]").forEach((pill) => {
+        pill.addEventListener("click", () => {
+            inputTipo.value = pill.dataset.pillCategoria;
+            document.querySelectorAll("[data-pill-categoria]").forEach((p) => p.classList.remove("activa"));
+            pill.classList.add("activa");
+        });
+    });
+    inputTipo?.addEventListener("input", () => {
+        const v = inputTipo.value.trim().toLowerCase();
+        document.querySelectorAll("[data-pill-categoria]").forEach((p) => {
+            p.classList.toggle("activa", p.dataset.pillCategoria.toLowerCase() === v);
+        });
+    });
+    inputTipo?.addEventListener("blur", () => {
+        const v = inputTipo.value.trim();
+        if (v && v.toLowerCase() !== "noticia") {
+            recordarCategoria(v);
+        }
+    });
+    document.querySelectorAll("[data-borrar-categoria]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            olvidarCategoria(btn.dataset.borrarCategoria);
+            btn.closest(".pill-categoria-wrap")?.remove();
+        });
+    });
+
+    // Pills de país — multi-select (cada click suma o saca, a
+    // diferencia de las pills de categoría que son de una sola).
+    document.querySelectorAll("#pills-paises-notif [data-pill-pais]").forEach((pill) => {
+        pill.addEventListener("click", () => pill.classList.toggle("activa"));
+    });
+
+    // Locales visibles solo con "Locales específicos" — transición suave sin layout shift.
+    const wrapSucursal = document.getElementById("wrap-sucursal-notif");
+    const wrapUsuarios = document.getElementById("wrap-usuarios-notif");
+    const wrapNoAplica = document.getElementById("wrap-noaplica-notif");
+    const wrapPaises = document.getElementById("wrap-paises-notif");
+    function actualizarWrapsSurcursalUsuarios() {
+        const dirigido = document.querySelector(".input-dirigido-a:checked")?.value || "";
+        if (wrapPaises) {
+            if (dirigido === "paises") {
+                wrapPaises.classList.remove("hidden");
+            } else {
+                wrapPaises.classList.add("hidden");
+            }
+        }
+        if (wrapSucursal) {
+            if (dirigido === "colaboradores-local") {
+                wrapSucursal.classList.remove("hidden");
+            } else {
+                wrapSucursal.classList.add("hidden");
+            }
+        }
+        if (wrapUsuarios) {
+            if (dirigido === "usuarios-especificos") {
+                wrapUsuarios.classList.remove("hidden");
+            } else {
+                wrapUsuarios.classList.add("hidden");
+            }
+        }
+        if (wrapNoAplica) {
+            if (dirigido === "paises") {
+                wrapNoAplica.classList.remove("hidden");
+            } else {
+                wrapNoAplica.classList.add("hidden");
+            }
+        }
+    }
+    // Una línea que explica SOLO la opción elegida (antes cada opción
+    // traía su párrafo y se leían todos a la vez).
+    function actualizarAyudaDirigido() {
+        const ayuda = document.getElementById("ayuda-dirigido");
+        if (ayuda) ayuda.textContent = document.querySelector(".input-dirigido-a:checked")?.dataset.desc || "";
+    }
+    document.querySelectorAll(".input-dirigido-a").forEach((r) => r.addEventListener("change", () => { actualizarWrapsSurcursalUsuarios(); actualizarAyudaDirigido(); }));
+    actualizarWrapsSurcursalUsuarios();
+    actualizarAyudaDirigido();
+
+    // Bindear multiselect de usuarios
+    bindMultiSelectUsuarios("input-usuarios-notif");
+
+    // Adjuntos dinámicos — agregar/eliminar enlaces. Devuelve la fila
+    // creada para que el upload de archivo también pueda usarla.
+    function agregarFilaAdjunto({ url = "", label = "" } = {}) {
+        const lista = document.getElementById("lista-adjuntos");
+        lista.insertAdjacentHTML("beforeend", filaAdjuntoHtml({ url, label }));
+        const nuevoItem = lista.lastElementChild;
+        nuevoItem.querySelector(".btn-eliminar-adjunto").addEventListener("click", () => {
+            nuevoItem.remove();
+        });
+        return nuevoItem;
+    }
+
+    document.getElementById("btn-agregar-adjunto")?.addEventListener("click", () => {
+        agregarFilaAdjunto().querySelector(".input-adjunto-url")?.focus();
+    });
+
+    // Subir un archivo (PDF, Excel, Word, imagen…) directo a Drive: el
+    // backend lo guarda en Recursos/Tipo/Año/Mes y devuelve el link
+    // público, que se carga solo como un enlace más de la noticia. Así
+    // no hace falta subirlo a mano a Drive y copiar la URL.
+    const inputArchivo = document.getElementById("input-archivo-adjunto");
+    const btnSubirArchivo = document.getElementById("btn-subir-archivo");
+
+    btnSubirArchivo?.addEventListener("click", () => inputArchivo?.click());
+
+    inputArchivo?.addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const tituloSubir = btnSubirArchivo.querySelector(".fs-drop-titulo");
+        const textoOriginal = tituloSubir.textContent;
+        btnSubirArchivo.disabled = true;
+        tituloSubir.textContent = "Subiendo...";
+
+        try {
+            const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+                reader.readAsDataURL(file);
+            });
+
+            const resultado = await gasRequest("subirArchivo", {
+                nombreArchivo: file.name,
+                extension: file.name.split(".").pop() || "bin",
+                archivoBase64: base64,
+            });
+
+            if (!resultado || !resultado.ok) {
+                throw new Error(resultado?.error || "No se pudo subir el archivo.");
+            }
+
+            agregarFilaAdjunto({ url: resultado.url, label: file.name });
+        } catch (err) {
+            alert(err.message || "No se pudo subir el archivo.");
+        } finally {
+            inputArchivo.value = "";
+            btnSubirArchivo.disabled = false;
+            tituloSubir.textContent = textoOriginal;
+        }
+    });
+
+    document.querySelectorAll(".btn-eliminar-adjunto").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            e.currentTarget.closest(".adjunto-item")?.remove();
+        });
+    });
+
+    document.getElementById("btn-ayuda-news")?.addEventListener("click", () => {
+        alert("News son avisos para tu equipo. Elegí el público, escribí el mensaje y publicá ahora o programá una fecha. Supervisión siempre recibe copia.");
+    });
+
+    document.getElementById("btn-cancelar-news")?.addEventListener("click", () => navigate("news"));
+
+    const btnPublicar = document.getElementById("btn-publicar-news");
+    btnPublicar?.addEventListener("click", async () => {
+        if (btnPublicar.disabled) return;
+        const cambios = leerCamposNotificacion();
+        if (!cambios.titulo || !cambios.resumen) {
+            alert("Completá al menos el título y la descripción.");
+            return;
+        }
+        if (!cambios.fecha) { alert("Elegí una fecha de publicación."); return; }
+
+        // Confirmación con los destinatarios ESCRITOS. El destinatario se
+        // elige arriba de todo en el formulario y se pierde de vista
+        // mientras se redacta; publicar sin volver a mirarlo es
+        // exactamente el error que preocupa ("si envié pero no presté
+        // atención a quién, sería un problema"). Acá no se puede
+        // deshacer: una vez publicada ya salió el push.
+        const aQuien = await descripcionDestinatarios(cambios);
+        if (!confirm(`Se va a enviar a:\n\n${aQuien}\n\n¿Confirmás?`)) return;
+
+        const textoOriginal = btnPublicar.textContent;
+        btnPublicar.disabled = true;
+        btnPublicar.textContent = "Guardando...";
+
+        try {
+            recordarCategoria(cambios.tipo);
+            const usuario = getUsuarioActual();
+
+            // "destacado" viaja como booleano crudo desde el checkbox, y
+            // la Sheet lo necesita como "SI"/"NO" (mismo formato que
+            // escribe crearNoticia, que normalizarNoticia espera al
+            // leer) — se convierte acá, en un objeto aparte, para no
+            // tocar el "cambios" que también usa la rama de creación de
+            // abajo (esa sí necesita el booleano crudo — su propio
+            // ternario ya lo convierte). "adjuntos" ya no hace falta
+            // tocarlo acá: actualizarNoticia() lo convierte a JSON solo
+            // (ver data/noticias.js) — antes no lo hacía, y editar el
+            // adjunto de una noticia ya publicada guardaba "editada"
+            // sin error pero el cambio nunca se veía.
+            if (id) {
+                await actualizarNoticia(id, { ...cambios, destacado: cambios.destacado ? "SI" : "NO" });
+                registrarEvento(usuario.id, "editar_noticia", `Notificación "${cambios.titulo}" editada`);
+            } else {
+                await crearNoticia(cambios);
+                registrarEvento(usuario.id, "crear_noticia", `Notificación creada: ${cambios.titulo}`);
+                // ANTES esto no se esperaba ("no bloquea la navegación") —
+                // bug real reportado en vivo: creando dos News seguidas, el
+                // push de una de las dos nunca llegó (la News sí quedó
+                // guardada). Sin await, el fetch del push quedaba corriendo
+                // en segundo plano justo cuando se armaba el siguiente
+                // request (la próxima News) — y un error ahí se perdía sin
+                // rastro, el catch de abajo lo tragaba en silencio. Ahora
+                // se espera a que el push termine (éxito o error, sí se
+                // loguea) antes de dejar publicar la siguiente — medio
+                // segundo más de espera es preferible a un push que
+                // desaparece sin explicación.
+                try {
+                    const [usuarios, sucursales] = await Promise.all([getUsuarios(), getSucursales()]);
+                    const resultadoPush = await mandarPushDeNoticia(cambios, usuarios, sucursales);
+                    // Pedido explícito (2026-09-02): "es importante saber si a
+                    // las personas que se le envía News los reciben". Primer
+                    // intento con un alert() de nombres pegados en un texto —
+                    // el usuario lo frenó en el acto probándolo con captura
+                    // real: "no tiene coherencia esto si tengo 500 usuarios y
+                    // hay 348 que no lo tienen". Un pill con el número
+                    // (mismo lenguaje visual que el badge de Colaboradores)
+                    // que se expande a la lista con scroll SOLO si hace
+                    // falta ver los nombres — coherente con 18 o con 348.
+                    //
+                    // navigate() queda a cargo del CIERRE del modal (no acá
+                    // abajo, incondicional) — el navigate de siempre ya
+                    // reconstruye el contenido de la página, y hacerlo con
+                    // el modal recién abierto lo dejaba huérfano antes de
+                    // que la persona llegara a verlo.
+                    if (resultadoPush.destinatarios > 0) {
+                        actualizarContadorCampana();
+                        mostrarResultadoPushNews(resultadoPush, () => navigate("news"));
+                        return;
+                    }
+                } catch (err) {
+                    console.warn("No se pudo mandar el push de la noticia:", err.message);
+                }
+            }
+            actualizarContadorCampana();
+            navigate("news");
+        } catch (err) {
+            alert(err.message || "No se pudo guardar. Probá de nuevo.");
+            btnPublicar.disabled = false;
+            btnPublicar.textContent = textoOriginal;
+        }
+    });
+}
+
