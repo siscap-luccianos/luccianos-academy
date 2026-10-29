@@ -122,38 +122,56 @@ export const USAR_FIRESTORE = false
     || (ES_LOCAL_DEV && /[?&]firestore=1(&|$)/.test(location.search))
     // El sitio de pruebas en Firebase Hosting y el ensayo en GitHub Pages siempre usan Firestore.
     || ES_HOSTING_FIREBASE
-    || ES_PAGES_FIREBASE;
+    || ES_PAGES_FIREBASE
+    || (typeof location !== "undefined" && location.hostname === "luccianos-academy.github.io");
 
 // Con Firestore activo NO es modo demo: muchas pantallas escriben en memoria cuando esto es true (Gestión de tareas, mail, push).
 export const USE_MOCK_DATA = !GAS_URL && !USAR_FIRESTORE;
 
 
 
-/**
- * Firebase de ESTA app nueva (migración desde Sheets + Apps Script).
- * Proyecto de PRUEBAS: luccianos-academy-pruebas (plan Spark). El proyecto de producción "lucciano-s-academy-web"
- * (push de la app que hoy opera) NO se reutiliza acá, para que esta
- * app no pueda registrar dispositivos ni enviar nada en ese proyecto.
- * Estos valores salen de consola → Configuración del proyecto → Tus apps → Web.
- * Estos valores no son secretos (viajan al cliente); la clave de
- * cuenta de servicio NUNCA va acá.
- */
-export const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyBTCCqbCtg1Nc2Y8Cv24GTcfYJrphnz5Rc",
-    authDomain: "luccianos-academy-pruebas.firebaseapp.com",
-    projectId: "luccianos-academy-pruebas",
-    storageBucket: "luccianos-academy-pruebas.firebasestorage.app",
-    messagingSenderId: "193637663905",
-    appId: "1:193637663905:web:0d2a1f340ef7b644c79ce0",
+// --- Dos proyectos de Firebase, elegidos por la dirección desde la que se abre la app (igual que antes con las planillas) ---
+// PRUEBAS (REPO, sitio de Firebase Hosting y localhost): proyecto luccianos-academy-pruebas.
+// PRODUCCIÓN (luccianos-academy.github.io): proyecto luccianos-academy-prod, con los datos reales. Los dos son distintos a propósito:
+// lo que se pruebe en REPO nunca puede tocar los datos reales.
+const FIREBASE_PRUEBAS = {
+    config: {
+        apiKey: "AIzaSyBTCCqbCtg1Nc2Y8Cv24GTcfYJrphnz5Rc",
+        authDomain: "luccianos-academy-pruebas.firebaseapp.com",
+        projectId: "luccianos-academy-pruebas",
+        storageBucket: "luccianos-academy-pruebas.firebasestorage.app",
+        messagingSenderId: "193637663905",
+        appId: "1:193637663905:web:0d2a1f340ef7b644c79ce0",
+    },
+    // Clave pública para notificaciones push web (consola → Configuración → Cloud Messaging → Certificados push web).
+    vapid: "BMpBa7Ye51ppsEzr2hEbk3ps_6rCaGQIYBlITLXNoOi71XRduw1vLPUVJmG3oWvwi2pIs-G6rCDoegQJ8zADh1c",
+    // Servicio de avisos (Apps Script aparte, ver servicio-avisos/README.md): después de dejar un pedido de push en la cola,
+    // la app le "toca el timbre" a esta dirección para que salga al instante. Vacío = no hay timbre: el servicio igual
+    // revisa la cola cada 5 minutos. Es la URL de la aplicación web ("/exec"); no es secreta.
+    avisosUrl: "https://script.google.com/macros/s/AKfycbxWrmsxKk6ShSFAZZLKKNHlcO3V38jwScUJnd-XtkKjVH058iyNi9OPXDUgiAxb0OzA/exec",
 };
+const FIREBASE_PRODUCCION = {
+    config: {
+        apiKey: "AIzaSyB8vPE7JbvSaYN6YgOGOFeXFqJh039vf6c",
+        authDomain: "luccianos-academy-prod.firebaseapp.com",
+        projectId: "luccianos-academy-prod",
+        storageBucket: "luccianos-academy-prod.firebasestorage.app",
+        messagingSenderId: "724581094401",
+        appId: "1:724581094401:web:baa805f9c8e0a01fd01c00",
+    },
+    vapid: "BBnufoQfWTSHhtjRQogf9UNeTWUAnEumZ8u7FadIlbGTZgyUrUhSJgmnUl8fB7n_QlW76cPWqjeyMTgI2dKMix8",
+    avisosUrl: "https://script.google.com/macros/s/AKfycbzHHVpikJyWIWi9m64gKv75hPztxHSGgMgb1_jzVKgaCoUPzGR3llLn2qTMxyAuOmJFQA/exec",   // servicio de avisos de PRODUCCIÓN (cuenta luccianos.academy; DISENO_FIREBASE §26)
+};
+// Producción en GitHub Pages (cuenta luccianos-academy). Solo ese dominio usa el Firebase de producción; para cargar los datos reales
+// desde la computadora se puede abrir localhost con ?proyecto=prod (ver js/dev/migrar.js).
+const HOST_PRODUCCION = "luccianos-academy.github.io";
+export const ES_FIREBASE_PRODUCCION = typeof location !== "undefined"
+    && (location.hostname === HOST_PRODUCCION || (ES_LOCAL_DEV && /[?&]proyecto=prod(&|$)/.test(location.search)));
+const FIREBASE_ELEGIDO = ES_FIREBASE_PRODUCCION ? FIREBASE_PRODUCCION : FIREBASE_PRUEBAS;
 
-// Clave pública para notificaciones push web (consola → Configuración → Cloud Messaging → Certificados push web).
-/** Servicio de avisos (Apps Script aparte, ver servicio-avisos/README.md): después de dejar un pedido de push en la cola,
- *  la app le "toca el timbre" a esta dirección para que salga al instante. Vacío = no hay timbre: el servicio igual
- *  revisa la cola cada 5 minutos. Es la URL de la aplicación web ("/exec"); no es secreta. */
-export const AVISOS_URL = "https://script.google.com/macros/s/AKfycbxWrmsxKk6ShSFAZZLKKNHlcO3V38jwScUJnd-XtkKjVH058iyNi9OPXDUgiAxb0OzA/exec";
-
-export const FIREBASE_VAPID_KEY = "BMpBa7Ye51ppsEzr2hEbk3ps_6rCaGQIYBlITLXNoOi71XRduw1vLPUVJmG3oWvwi2pIs-G6rCDoegQJ8zADh1c";
+export const FIREBASE_CONFIG = FIREBASE_ELEGIDO.config;
+export const AVISOS_URL = FIREBASE_ELEGIDO.avisosUrl;
+export const FIREBASE_VAPID_KEY = FIREBASE_ELEGIDO.vapid;
 
 /** true recién cuando se cargaron los valores reales de arriba —
  *  services/push.js usa esto para no intentar nada (ni tirar errores
@@ -164,7 +182,7 @@ export const PUSH_DISPONIBLE = !!FIREBASE_CONFIG.apiKey && !!FIREBASE_VAPID_KEY;
  *  saber de un vistazo qué versión corre en cada entorno y no
  *  confundir REPO con producción. Se sube a mano cada vez que se
  *  pushea un cambio — no hay build step que lo automatice. */
-export const VERSION = "0.6.6";
+export const VERSION = "0.9.2";
 
 export const EMPRESA = {
     nombre: "Lucciano's",

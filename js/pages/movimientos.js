@@ -23,11 +23,9 @@ import { ActivityFeed } from "../components/activityFeed.js";
 import { Icon } from "../components/icons.js";
 import { getUsuarios } from "../data/usuarios.js";
 import { getAuditoria, detalleConNombres } from "../data/auditoria.js";
-import { getLocalesVisibles } from "../data/sucursales.js";
-import { getLocalesElegidos } from "../services/preferenciasLocales.js";
+import { getLocalesDeTrabajo } from "../data/sucursales.js";
 import { getUsuarioActual } from "../services/auth.js";
 import { mismoId } from "../services/ids.js";
-import { getTokens } from "../data/tokens.js";
 import { escaparHtml } from "../services/html.js";
 import { idiomaActual } from "../i18n/i18n.js";
 
@@ -109,11 +107,7 @@ async function actividadVisible() {
 
     let auditoria = auditoriaCompleta;
     if (usuario.rol === "supervisor") {
-        let misLocales = await getLocalesVisibles(usuario);
-        if (usuario.capacitador) {
-            const elegidos = getLocalesElegidos(usuario);
-            if (elegidos.length) misLocales = misLocales.filter((n) => elegidos.includes(n));
-        }
+        const misLocales = await getLocalesDeTrabajo(usuario);
         const equipoIds = usuarios.filter((u) => u.rol === "colaborador" && misLocales.includes(u.sucursal)).map((c) => String(c.id));
         auditoria = auditoriaCompleta.filter((a) => equipoIds.some((eid) => mismoId(eid, a.usuarioId)) || mismoId(a.usuarioId, usuario.id));
     }
@@ -181,11 +175,7 @@ function listaHtml(entradas) {
  *  gente. */
 async function colaboradoresVisibles(usuario, usuarios) {
     if (usuario.rol === "admin") return usuarios.filter((u) => u.rol === "colaborador");
-    let misLocales = await getLocalesVisibles(usuario);
-    if (usuario.capacitador) {
-        const elegidos = getLocalesElegidos(usuario);
-        if (elegidos.length) misLocales = misLocales.filter((n) => elegidos.includes(n));
-    }
+    const misLocales = await getLocalesDeTrabajo(usuario);
     return usuarios.filter((u) => u.rol === "colaborador" && misLocales.includes(u.sucursal));
 }
 
@@ -254,11 +244,10 @@ export async function Movimientos() {
     const puedeVerPush = usuario.rol === "admin" || usuario.rol === "supervisor";
     let resumenPush = "";
     if (puedeVerPush) {
-        const [usuarios, tokens] = await Promise.all([getUsuarios(), getTokens()]);
+        const usuarios = await getUsuarios();
         const equipo = await colaboradoresVisibles(usuario, usuarios);
-        const idsConPush = new Set(tokens.map((t) => String(t.usuarioId)));
-        const conPush = equipo.filter((u) => idsConPush.has(String(u.id)));
-        const sinPush = equipo.filter((u) => !idsConPush.has(String(u.id)));
+        const conPush = equipo.filter((u) => u.tienePush);
+        const sinPush = equipo.filter((u) => !u.tienePush);
         resumenPush = resumenPushHtml({ total: equipo.length, conPush: conPush.map((u) => u.nombre), sinPush: sinPush.map((u) => u.nombre) });
     }
 
@@ -324,6 +313,7 @@ export function bindMovimientos() {
             intervaloMovimientos = null;
             return;
         }
+        if (document.hidden) return;     // pantalla apagada o app en segundo plano: no se consulta nada
         const frescas = await actividadVisible();
         // Sigue existiendo tras el await? el chequeo de arriba pudo
         // pasar y de ahí a acá haberse navegado afuera.
@@ -331,5 +321,5 @@ export function bindMovimientos() {
             entradasActuales = frescas;
             redibujarLista();
         }
-    }, 20000);
+    }, 60000);
 }

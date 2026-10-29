@@ -51,11 +51,16 @@ function normalizarUsuario(f) {
         // que existiera esta columna quedan con "" — inicioColaborador.js
         // cae a un proxy honesto (primera asignación) solo en ese caso.
         fechaAlta: String(f.fechaAlta || "").trim().slice(0, 10),
+        // Con qué clave está guardado el documento (Firestore). Si no es igual al correo, la persona no puede entrar: ver el aviso en Colaboradores.
+        claveDoc: String(f._clave || ""),
         // Igual que "encargado" pero sobre un Supervisor: mismo rol,
         // mismos permisos, es solo una etiqueta para diferenciarlo de
         // un Supervisor de sucursal en la interfaz (así el capacitador
         // no queda mezclado con "el supervisor" sin que nadie lo note).
         capacitador: String(f.capacitador || "").trim().toUpperCase() === "SI",
+        // La persona tiene al menos un dispositivo con push registrado (la marca la pone la app al registrar el token y la
+        // limpia el servicio de avisos cuando se queda sin ninguno). Evita leer toda la colección de tokens.
+        tienePush: String(f.tienePush || "").trim().toUpperCase() === "SI",
         // Gate de "Nuestra Historia" (pedido explícito del usuario:
         // que la vean antes de empezar la formación) — ver router.js
         // y pages/historia.js. Vacío = todavía no la vio (incluye

@@ -21,6 +21,7 @@
 
 import { cicloActual } from "./gestionCiclo.js";
 import { parsearFirmaSubitem, serializarFirmaSubitem } from "./subitems.js";
+import { localesDeSupervisor } from "./supervisores.js";
 
 // Hojas de contenido casi estático: un documento "paquete" por hoja, contenido/{hoja}.items
 const PAQUETES = [
@@ -44,7 +45,7 @@ const ESPECIALES = ["GestionTareasSucursal", "GestionChecks", "DesafioResultados
 const DIAS_ISO = ["", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
 // En la planilla son "SI"/"NO"; las reglas de Firestore necesitan booleanos.
-const FLAGS_USUARIO = ["activo", "encargado", "responsableTurno", "capacitador"];
+const FLAGS_USUARIO = ["activo", "encargado", "responsableTurno", "capacitador", "tienePush"];
 
 // El vencimiento de acceso es una FECHA ("2026-11-16") que vale hasta el final de ese
 // día en Argentina (UTC-3), igual que hoy: el backend lo considera vencido recién al día siguiente.
@@ -66,7 +67,7 @@ async function miniaturaPorDefecto(foto) {
     return f.length <= MAX_MINIATURA ? f : "";
 }   // caracteres del data URL (~90 KB)
 
-function confirmar(promesa) {
+function confirmarBase(promesa) {
     return new Promise((resolve, reject) => {
         let seguimos = false;
         const reloj = setTimeout(() => { seguimos = true; resolve({ pendiente: true }); }, ESPERA_ESCRITURA_MS);
@@ -98,6 +99,7 @@ export function desdeFirestore(hoja, data, idDelDoc) {
     if (hoja === "Usuarios") {
         FLAGS_USUARIO.forEach((k) => { if (k in fila) fila[k] = fila[k] === true ? "SI" : "NO"; });
         fila.fechaVencimientoAcceso = timestampAFecha(fila.fechaVencimientoAcceso);
+        fila._clave = idDelDoc;       // con qué clave está guardado el documento: para entrar tiene que ser igual al correo (ver cambiarCorreoDeUsuario)
     }
     // "leidoPor" es texto en la planilla ("1,46,30") y arreglo en Firestore.
     if (hoja === "Noticias" && Array.isArray(fila.leidoPor)) fila.leidoPor = fila.leidoPor.join(",");
@@ -129,7 +131,7 @@ export function finDeDiaEnMs(texto) {
     return isNaN(ms) ? null : ms;
 }
 
-export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.now(), cacheMs = 20000, avisosUrl = "", miniaturaFoto = miniaturaPorDefecto, fetchFn = typeof fetch === "function" ? fetch : null }) {
+export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.now(), cacheMs = 20000, escuchas = undefined, almacen = null, avisosUrl = "", getLocalesExtra = () => [], miniaturaFoto = miniaturaPorDefecto, fetchFn = typeof fetch === "function" ? fetch : null }) {
     const {
         doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, where,
         orderBy, limit, runTransaction, writeBatch, deleteField, serverTimestamp, Timestamp,
@@ -137,6 +139,128 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
 
     const cache = {};      // { [hoja]: { datos, ts } }
     const enVuelo = {};    // dedupe de pedidos simultáneos de una misma hoja
+
+    /* ---------- cuidado del cupo de lecturas (Spark: 50.000 por día) ----------
+       Cada documento que baja de Firestore es una lectura. Tres reglas para no gastarlas de más:
+       1) Las listas grandes (Usuarios, Asignaciones, Resultados) duran minutos en memoria, no segundos; cualquier escritura
+          propia las invalida, y el botón de refrescar de la barra las vuelve a pedir.
+       2) La Auditoría, una vez leída, solo pide lo NUEVO (creadoEn mayor al último que ya tiene).
+       3) Las marcas de Gestión de un local se siguen con una escucha en vivo: cuesta una lectura por cada marca que cambia
+          y cero mientras nadie toca nada (antes: todas las marcas del local cada 5 segundos).
+       Con cacheMs = 0 (las pruebas) nada de esto actúa: cada lectura va al servidor. */
+    const TTL_LISTAS_MS = 5 * 60 * 1000;
+    const TTL_LISTAS_INCREMENTAL_MS = 60 * 1000;      // con lectura incremental, repasar cada minuto cuesta ~1 lectura por lista
+    const TTL_PAQUETES_MS = 2 * 60 * 1000;
+    const TTL_AUDITORIA_MS = 60 * 1000;
+    const TTL_NOTICIAS_MS = 60 * 1000;
+    const TTL_DESAFIO_MS = 3 * 60 * 1000;                 // el ranking cuesta ~15 lecturas por visita: se repasa cada 3 min
+    const TTL_DESAFIO_HISTORIAL_MS = 10 * 60 * 1000;      // meses ya cerrados
+    function ttlDe(hoja) {
+        if (cacheMs <= 0) return 0;
+        if (hoja === "Usuarios" || hoja === "Asignaciones" || hoja === "Resultados") return almacen && (esGestion(yo()) || yo().encargado) ? Math.max(cacheMs, TTL_LISTAS_INCREMENTAL_MS) : Math.max(cacheMs, TTL_LISTAS_MS);
+        if (hoja === "Auditoria") return Math.max(cacheMs, TTL_AUDITORIA_MS);
+        if (hoja === "DesafioResultados") return Math.max(cacheMs, TTL_DESAFIO_MS);       // jugar invalida la propia; los demás cambian de a poco
+        if (hoja === "DesafioHistorial") return Math.max(cacheMs, TTL_DESAFIO_HISTORIAL_MS);
+        if (hoja === "Noticias") return Math.max(cacheMs, TTL_NOTICIAS_MS);
+        if (PAQUETES.includes(hoja) || hoja === "GestionTareasSucursal") return Math.max(cacheMs, TTL_PAQUETES_MS);
+        return cacheMs;
+    }
+    let auditoriaUltimoMs = 0;
+    // Lecturas incrementales de las 3 listas grandes (solo Admin/Supervisor, y solo si hay almacén en el dispositivo):
+    // cada documento lleva `modificadoEn` (ms) puesto por cada escritura; se guarda la lista leída y la próxima vez se piden
+    // solo los documentos con `modificadoEn` mayor al último visto. Una lectura completa de respaldo cada 24 h por si algo
+    // (un borrado hecho desde otro equipo, un reloj atrasado) no se vio. Nunca falla hacia afuera: sin copia, se lee completo.
+    const INCREMENTALES = ["Usuarios", "Asignaciones", "Resultados"];
+    const COMPLETA_CADA_MS = 7 * 24 * 60 * 60 * 1000;      // red de seguridad; los borrados se avisan aparte (meta/borrados)
+    const SOLAPE_MS = 5 * 60 * 1000;
+    // "Copia primero": cada lista que se lee se guarda en el dispositivo con la hora. Al abrir la app (o volver a una pantalla) se
+    // usa esa copia SIN preguntarle nada a la base mientras sea reciente: 10 min para listas de Admin/Supervisor/Responsable de local,
+    // 30 min para el contenido (cursos, lecciones...). El botón de actualizar de la barra la salta, y cualquier escritura propia
+    // invalida esa lista. Si la base no responde (sin señal, límite diario alcanzado) se muestra la última copia, aunque sea vieja.
+    const FRESCURA_LISTAS_MS = 10 * 60 * 1000;
+    const FRESCURA_PROPIA_MS = 2 * 60 * 1000;
+    const FRESCURA_PAQUETES_MS = 30 * 60 * 1000;
+    const FRESCURA_SUCURSALES_MS = 5 * 60 * 1000;
+    const COPIABLES = [...INCREMENTALES, "Noticias", "Tokens", "Auditoria", ...PAQUETES];
+    let ignorarCopiasAntesDe = 0;          // botón de actualizar: ninguna copia anterior a este instante vale
+    const ignorarHojaAntesDe = {};         // escritura propia en una hoja: ninguna copia anterior de esa hoja vale
+    let mostrandoDatosViejos = false;
+    const claveCopia = (hoja) => `cp|${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
+    const copiable = (hoja) => !!almacen && cacheMs > 0 && COPIABLES.includes(hoja);
+    function frescuraDe(hoja) {
+        if (hoja === "Sucursales") return FRESCURA_SUCURSALES_MS;       // de acá sale "qué locales supervisa cada uno": una corrección tiene que llegar rápido
+        if (PAQUETES.includes(hoja)) return FRESCURA_PAQUETES_MS;
+        const u = yo();
+        return esGestion(u) || u.encargado ? FRESCURA_LISTAS_MS : FRESCURA_PROPIA_MS;
+    }
+    async function leerCopia(hoja) {
+        try { const c = await almacen.leer(claveCopia(hoja)); return c && Array.isArray(c.filas) ? c : null; } catch (err) { return null; }
+    }
+    async function guardarCopia(hoja, filas, extra) {
+        try { await almacen.guardar(claveCopia(hoja), { filas, guardadoEn: ahora(), extra }); } catch (err) { /* sin copia */ }
+    }
+    const copiaVale = (hoja, c) => c.guardadoEn > ignorarCopiasAntesDe && c.guardadoEn > (ignorarHojaAntesDe[hoja] || 0) && ahora() - c.guardadoEn < frescuraDe(hoja) && ahora() >= c.guardadoEn;
+    const claveAlmacen = (hoja) => `${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
+    // Un borrado no se ve en una lectura incremental. Quien borra (o importa) deja la hora en meta/borrados; al abrir, cada dispositivo
+    // comprueba ese único documento (1 lectura, memoria de 5 min) y, si su copia es anterior, la rehace completa. Así la lectura completa
+    // diaria deja de hacer falta y cada Responsable de local ya no baja ~300 documentos por día.
+    let borradosCache = null;
+    async function leerBorrados() {
+        if (borradosCache && ahora() - borradosCache.ts < 5 * 60 * 1000) return borradosCache.datos;
+        let datos = {};
+        try { const snap = await getDoc(doc(db, "meta", "borrados")); datos = snap.exists() ? snap.data() : {}; } catch (err) { datos = null; }
+        if (datos === null) return null;                    // no se pudo leer: quien llama decide (se rehace completa por prudencia)
+        borradosCache = { datos, ts: ahora() };
+        return datos;
+    }
+    async function marcarBorrado(hoja) {
+        if (!INCREMENTALES.includes(hoja)) return;
+        try { await setDoc(doc(db, "meta", "borrados"), { [hoja]: ahora() }, { merge: true }); borradosCache = null; } catch (err) { /* sin permiso: queda la red de 7 días */ }
+    }
+    const olvidarAlmacen = async (hoja) => { if (almacen && INCREMENTALES.includes(hoja)) { try { await almacen.borrar(claveAlmacen(hoja)); } catch (err) { /* sin copia */ } } };
+    const usarEscuchas = escuchas !== undefined ? !!escuchas : (cacheMs > 0 && typeof sdk.onSnapshot === "function");
+    const vivos = {};      // { [sucursal]: { datos, ciclos, listo, desuscribir, ultimoUso } }
+    const SIN_USO_CIERRA_MS = 90 * 1000;
+    let limpiador = null;
+    function programarLimpieza() {
+        if (limpiador || typeof setInterval !== "function") return;
+        limpiador = setInterval(() => {
+            Object.entries(vivos).forEach(([suc, v]) => {
+                if (ahora() - v.ultimoUso > SIN_USO_CIERRA_MS) { try { v.desuscribir(); } catch (err) { /* ya cerrada */ } delete vivos[suc]; }
+            });
+            if (!Object.keys(vivos).length) { clearInterval(limpiador); limpiador = null; }
+        }, 30 * 1000);
+        if (limpiador.unref) limpiador.unref();
+    }
+    function cerrarEscuchas() {
+        Object.entries(vivos).forEach(([suc, v]) => { try { v.desuscribir(); } catch (err) { /* ya cerrada */ } delete vivos[suc]; });
+        if (limpiador) { clearInterval(limpiador); limpiador = null; }
+    }
+
+    /* ---------- escrituras pendientes (sin señal) ---------- */
+    // Sin conexión, Firestore guarda lo escrito en el teléfono y lo manda solo al volver la señal. Para que la persona sepa que
+    // hay algo que todavía no llegó, se pregunta al SDK si quedan escrituras sin confirmar (también al abrir la app, por las de
+    // la sesión anterior). El aviso (components/pendientesSync.js) se enciende si tardan más de 1,5 s y se apaga solo al confirmarse.
+    let hayPendientes = false;
+    let revisionPendientes = 0;
+    const oyentesPendientes = new Set();
+    function fijarPendientes(valor) {
+        if (valor === hayPendientes) return;
+        hayPendientes = valor;
+        oyentesPendientes.forEach((f) => { try { f(valor); } catch (err) { /* un oyente roto no frena a los demás */ } });
+    }
+    function revisarPendientes() {
+        if (cacheMs <= 0 || typeof sdk.waitForPendingWrites !== "function") return;
+        const marca = ++revisionPendientes;
+        let resuelto = false;
+        sdk.waitForPendingWrites(db).then(() => { resuelto = true; if (marca === revisionPendientes) fijarPendientes(false); }, () => {});
+        setTimeout(() => { if (!resuelto && marca === revisionPendientes) fijarPendientes(true); }, 1500);
+    }
+    function confirmar(promesa) {
+        const r = confirmarBase(promesa);
+        r.then((res) => { if (res && res.pendiente) fijarPendientes(true); revisarPendientes(); }, () => {});
+        return r;
+    }
 
     /* ---------- utilidades ---------- */
     const yo = () => {
@@ -165,11 +289,13 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
     /* ---------- planilla ⇄ Firestore ---------- */
     function aFirestore(hoja, fila) {
         const d = { ...fila };
+        delete d._clave;
         if (hoja === "Usuarios") {
             FLAGS_USUARIO.forEach((k) => { if (k in d) d[k] = siNo(d[k]); });
             if (d.email != null) d.email = String(d.email).trim().toLowerCase();
             if ("fechaVencimientoAcceso" in d) d.fechaVencimientoAcceso = fechaATimestamp(d.fechaVencimientoAcceso);
         }
+        if (INCREMENTALES.includes(hoja)) d.modificadoEn = ahora();     // marca para las lecturas incrementales
         if (hoja === "Noticias" && "leidoPor" in d && !Array.isArray(d.leidoPor)) {
             d.leidoPor = String(d.leidoPor || "").split(",").map((s) => s.trim()).filter(Boolean);
         }
@@ -208,8 +334,10 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
 
     /* ---------- caché y deduplicación ---------- */
     // La clave del caché es "hoja|local": Gestión se lee por local y cada uno se cachea aparte.
-    function invalidar(hoja) { Object.keys(cache).filter((k) => k.startsWith(`${hoja}|`)).forEach((k) => delete cache[k]); }
-    function invalidarTodo() { Object.keys(cache).forEach((k) => delete cache[k]); }
+    // La Auditoría no se borra: queda marcada como vencida (ts = 0) y la próxima lectura solo pide lo nuevo.
+    function olvidar(k) { if (k.startsWith("Auditoria|") && cache[k]) cache[k].ts = 0; else delete cache[k]; }
+    function invalidar(hoja) { ignorarHojaAntesDe[hoja] = ahora(); Object.keys(cache).filter((k) => k.startsWith(`${hoja}|`)).forEach(olvidar); }
+    function invalidarTodo() { ignorarCopiasAntesDe = ahora(); Object.keys(cache).forEach(olvidar); }
 
     /* ---------- lectura ---------- */
     async function leerPaquete(hoja) {
@@ -217,11 +345,82 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         return snap.exists() ? (snap.data().items || []) : [];
     }
 
+    // Un Supervisor común (no Capacitador) solo trabaja con los locales que supervisa (más el suyo): de Asignaciones y Resultados
+    // baja solo las de esos locales. Es un ahorro de lecturas, no una barrera: las reglas siguen dejando leer todo a la gestión.
+    // Devuelve { locales, firma } o null si no corresponde acotar (Admin, Capacitador, sin locales conocidos).
+    const HOJAS_ACOTABLES = ["Asignaciones", "Resultados"];
+    async function alcanceDeSupervisor(hoja) {
+        const u = yo();
+        if (u.rol !== "supervisor" || siNo(u.capacitador) || !HOJAS_ACOTABLES.includes(hoja)) return null;
+        let sucursales = [];
+        try { sucursales = await fetchSheet("Sucursales"); } catch (err) { return null; }       // sin la lista de locales no se acota
+        // Sus locales asignados, el suyo y los que eligió seguir en "Elegir mis locales" (cualquiera de la red).
+        let extra = [];
+        try { extra = getLocalesExtra() || []; } catch (err) { /* sin preferencia guardada */ }
+        const locales = [...new Set([...localesDeSupervisor(u, sucursales), String(u.sucursal || "").trim(), ...extra.map((n) => String(n).trim())].filter(Boolean))].sort();
+        return locales.length ? { locales, firma: `sup:${locales.join("|")}` } : null;
+    }
+    // Documentos de una colección acotada a locales: `where in` admite hasta 30 valores por consulta.
+    async function docsDeLocales(col, locales, extra = []) {
+        const trozos = [];
+        for (let i = 0; i < locales.length; i += 30) trozos.push(locales.slice(i, i + 30));
+        const snaps = await Promise.all(trozos.map((t) => getDocs(query(col, where("sucursal", "in", t), ...extra))));
+        return snaps.flatMap((sn) => sn.docs);
+    }
+
+    // Admin/Supervisor: lista completa la primera vez (y cada 7 días); en el medio, solo lo que cambió.
+    // `suc` acota a un local (Responsable de local) y `alcance` a varios (Supervisor): mismo mecanismo, con índice (sucursal, modificadoEn).
+    async function leerIncremental(hoja, suc = null, alcance = null) {
+        const col = collection(db, COLECCIONES[hoja]);
+        const firma = alcance ? alcance.firma : "";
+        const docsConFiltros = async (extra) => {
+            if (alcance) return docsDeLocales(col, alcance.locales, extra);
+            const filtros = suc ? [where("sucursal", "==", suc)] : [];
+            const snap = await getDocs(filtros.length || extra.length ? query(col, ...filtros, ...extra) : col);
+            return snap.docs;
+        };
+        const clave = claveAlmacen(hoja);
+        const guardado = await almacen.leer(clave);
+        const t0 = ahora();
+        const claveFila = (f) => String(f.id);
+        let filas, ultimo;
+        let hayBorrados = false;
+        // Si cambió el conjunto de locales de este Supervisor, lo guardado no sirve: se rehace con el alcance nuevo.
+        const guardadoVale = guardado && Array.isArray(guardado.filas) && (guardado.alcance || "") === firma;
+        if (guardadoVale) {
+            const b = await leerBorrados();
+            hayBorrados = b === null || (Number(b[hoja]) || 0) > guardado.completoEn - SOLAPE_MS;
+        }
+        if (guardadoVale && !hayBorrados && t0 - guardado.completoEn < COMPLETA_CADA_MS && t0 >= guardado.completoEn) {
+            const desde = (guardado.ultimoMs || 0) - SOLAPE_MS;
+            const docs = await docsConFiltros([where("modificadoEn", ">", desde)]);
+            const mapa = new Map(guardado.filas.map((f) => [claveFila(f), f]));
+            docs.forEach((d) => { const f = desdeFirestore(hoja, d.data(), d.id); mapa.set(claveFila(f), f); });
+            filas = [...mapa.values()];
+            ultimo = Math.max(guardado.ultimoMs || 0, ...docs.map((d) => Number(d.data().modificadoEn) || 0));
+            await almacen.guardar(clave, { filas, ultimoMs: ultimo, completoEn: guardado.completoEn, alcance: firma });
+        } else {
+            const docs = await docsConFiltros([]);
+            filas = docs.map((d) => desdeFirestore(hoja, d.data(), d.id));
+            // Lo escrito de ahora en más tiene modificadoEn >= t0 (menos el solape); lo anterior ya está en `filas`.
+            ultimo = Math.max(t0, ...docs.map((d) => Number(d.data().modificadoEn) || 0));
+            await almacen.guardar(clave, { filas, ultimoMs: ultimo, completoEn: t0, alcance: firma });
+        }
+        return filas;
+    }
+
     async function leerColeccion(hoja) {
         const u = yo();
         const nombre = COLECCIONES[hoja];
         const col = collection(db, nombre);
         const gestion = esGestion(u);
+        const sucEncargado = !gestion && u.encargado ? String(u.sucursal || "").trim() : "";
+        const alcance = gestion ? await alcanceDeSupervisor(hoja) : null;
+        if (almacen && INCREMENTALES.includes(hoja) && (gestion || sucEncargado)) {
+            try { return await leerIncremental(hoja, sucEncargado || null, alcance); }
+            catch (err) { /* sin copia o consulta rechazada: se cae a la lectura completa de siempre */ }
+        }
+        if (alcance) return (await docsDeLocales(col, alcance.locales)).map((d) => desdeFirestore(hoja, d.data(), d.id));
         let snap;
 
         switch (hoja) {
@@ -240,17 +439,57 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
                 else snap = await getDocs(query(col, where("colaboradorEmail", "==", u.email)));
                 break;
             case "Tokens":
-                snap = gestion ? await getDocs(col) : await getDocs(query(col, where("usuarioEmail", "==", u.email)));
+                // Siempre los de uno mismo: saber QUIÉN tiene push lo da la marca `tienePush` de cada usuario (Admin/Supervisor
+                // ya bajan esa lista); leer todos los tokens costaba un documento por dispositivo en cada apertura.
+                snap = await getDocs(query(col, where("usuarioEmail", "==", u.email)));
                 break;
             case "Auditoria":
                 // Solo gestión, y nunca entera: las últimas MAX_AUDITORIA.
                 if (!gestion) return [];
                 snap = await getDocs(query(col, orderBy("creadoEn", "desc"), limit(MAX_AUDITORIA)));
+                auditoriaUltimoMs = snap.docs.reduce((m, d) => Math.max(m, Number(d.data().creadoEn) || 0), 0);
                 break;
             default: // Noticias: las lee cualquier persona con acceso vigente
                 snap = await getDocs(col);
         }
         return snap.docs.map((d) => desdeFirestore(hoja, d.data(), d.id));
+    }
+
+    // Solo lo que se agregó desde la última lectura (si no hay nada nuevo cuesta 1 lectura, no 200).
+    async function leerAuditoriaNuevas(previas) {
+        if (!esGestion(yo())) return [];
+        const snap = await getDocs(query(collection(db, "auditoria"), where("creadoEn", ">", auditoriaUltimoMs), orderBy("creadoEn", "desc"), limit(MAX_AUDITORIA)));
+        if (snap.empty) return previas;
+        auditoriaUltimoMs = snap.docs.reduce((m, d) => Math.max(m, Number(d.data().creadoEn) || 0), auditoriaUltimoMs);
+        const nuevas = snap.docs.map((d) => desdeFirestore("Auditoria", d.data(), d.id));
+        const ids = new Set(nuevas.map((f) => String(f.id)));
+        return [...nuevas, ...previas.filter((f) => !ids.has(String(f.id)))].slice(0, MAX_AUDITORIA);
+    }
+
+    // Marcas de Gestión de UN local, en vivo (ver el comentario de arriba). Se cierra sola a los 90 s sin uso.
+    function checksEnVivo(suc) {
+        const ciclos = [cicloActual("semanal"), cicloActual("mensual")];
+        const claveCiclos = ciclos.join("|");
+        let v = vivos[suc];
+        if (v && v.ciclos !== claveCiclos) { try { v.desuscribir(); } catch (err) { /* ya cerrada */ } delete vivos[suc]; v = null; }   // cambió la semana o el mes
+        if (!v) {
+            v = { datos: null, ciclos: claveCiclos, ultimoUso: ahora(), desuscribir: () => {} };
+            v.listo = new Promise((resolver, rechazar) => {
+                let primera = true;
+                v.desuscribir = sdk.onSnapshot(
+                    query(collection(db, "gestionChecks"), where("sucursal", "==", suc), where("ciclo", "in", ciclos)),
+                    (snap) => {
+                        v.datos = snap.docs.map((d) => desdeFirestore("GestionChecks", d.data(), d.id));
+                        if (primera) { primera = false; resolver(); }
+                    },
+                    (err) => { if (vivos[suc] === v) delete vivos[suc]; if (primera) { primera = false; rechazar(err); } },
+                );
+            });
+            vivos[suc] = v;
+            programarLimpieza();
+        }
+        v.ultimoUso = ahora();
+        return v;
     }
 
     // Gestión de tareas y Desafío. `opciones.sucursal` acota la lectura a UN local (lo pide la pantalla
@@ -317,13 +556,38 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         if (!esPaquete && !esEspecial && !COLECCIONES[hoja]) {
             throw new Error(`La hoja "${hoja}" todavía no está migrada a Firestore.`);
         }
+        // Marcas de Gestión de un local: en vivo, sin pasar por la memoria de 20 s (la escucha siempre está al día).
+        if (hoja === "GestionChecks" && usarEscuchas) {
+            const u = yo();
+            const suc = esGestion(u) ? (opciones.sucursal || null) : String(u.sucursal || "").trim();
+            if (suc) {
+                try {
+                    const v = checksEnVivo(suc);
+                    await v.listo;
+                    return [...v.datos];
+                } catch (err) { /* sin escucha (permiso, red): se cae a la lectura de siempre */ }
+            }
+        }
         const clave = `${hoja}|${opciones.sucursal || ""}`;
         const c = cache[clave];
-        if (c && ahora() - c.ts < cacheMs) return [...c.datos];
+        if (c && ahora() - c.ts < ttlDe(hoja)) return [...c.datos];
 
         if (!enVuelo[clave]) {
-            const lectura = esPaquete ? leerPaquete(hoja) : esEspecial ? leerEspecial(hoja, opciones) : leerColeccion(hoja);
-            enVuelo[clave] = lectura
+            enVuelo[clave] = (async () => {
+                const copia = copiable(hoja) ? await leerCopia(hoja) : null;
+                if (copia && copiaVale(hoja, copia)) { mostrandoDatosViejos = false; return copia.filas; }          // reciente: cero lecturas
+                const previasAuditoria = c ? c.datos : (copia && copia.extra && copia.extra.ultimoMs ? (auditoriaUltimoMs = copia.extra.ultimoMs, copia.filas) : null);
+                try {
+                    const filas = hoja === "Auditoria" && previasAuditoria && auditoriaUltimoMs > 0 ? await leerAuditoriaNuevas(previasAuditoria)
+                        : esPaquete ? await leerPaquete(hoja) : esEspecial ? await leerEspecial(hoja, opciones) : await leerColeccion(hoja);
+                    if (copiable(hoja)) await guardarCopia(hoja, filas, hoja === "Auditoria" ? { ultimoMs: auditoriaUltimoMs } : undefined);
+                    mostrandoDatosViejos = false;
+                    return filas;
+                } catch (err) {
+                    if (copia) { mostrandoDatosViejos = true; console.warn(`[datos] La base no respondió (${err.code || err.message}); se muestra la última copia guardada de ${hoja}.`); return copia.filas; }
+                    throw err;
+                }
+            })()
                 .then((filas) => { cache[clave] = { datos: filas, ts: ahora() }; return filas; })
                 .finally(() => { delete enVuelo[clave]; });
         }
@@ -411,9 +675,69 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         if (!ref) return { ok: false };
         const parcial = aFirestore(hoja, cambios);
         delete parcial.id; // el id no se reescribe
+        if (hoja === "Usuarios" && parcial.email && parcial.email !== ref.id) return cambiarCorreoDeUsuario(ref, parcial);
+        const localAnterior = hoja === "Usuarios" && parcial.sucursal ? localEnMemoria(ref.id) : undefined;     // antes de invalidar
         await confirmar(updateDoc(ref, parcial));
         invalidar(hoja);
+        if (hoja === "Usuarios" && parcial.sucursal && localAnterior !== parcial.sucursal) await propagarSucursal(ref.id, parcial.sucursal);
         return { ok: true };
+    }
+
+    // Asignaciones y Resultados llevan copiado el local de la persona (las reglas y las lecturas acotadas por local lo usan).
+    // Si la persona cambia de local, su historial la sigue: así el Supervisor/Responsable del local nuevo lo ve y el del viejo deja de verlo.
+    // El documento de una persona se llama como su correo (así la encuentra el ingreso y las reglas). Cambiar solo el campo email dejaba
+    // el documento con la clave vieja y la persona ya no podía entrar ("tu cuenta no está registrada"). Acá se MUEVE: se crea con la clave
+    // nueva y se borra la vieja en una sola operación, y el historial de la persona (asignaciones y resultados) se pasa al correo nuevo.
+    // Solo el Admin (las reglas no dejan borrar a nadie más). También repara una clave que ya había quedado distinta del correo.
+    async function cambiarCorreoDeUsuario(refVieja, parcial) {
+        if (yo().rol !== "admin") throw new Error("Solo el Admin puede cambiar el correo de una persona.");
+        const emailNuevo = parcial.email;
+        const refNueva = doc(db, "usuarios", emailNuevo);
+        const [vieja, existente] = await Promise.all([getDoc(refVieja), getDoc(refNueva)]);
+        if (!vieja.exists()) return { ok: false };
+        if (existente.exists()) throw new Error(`Ya hay una persona registrada con el correo ${emailNuevo}.`);
+        const emailViejo = refVieja.id;
+        const lote = writeBatch(db);
+        lote.set(refNueva, { ...vieja.data(), ...parcial, email: emailNuevo });
+        lote.delete(refVieja);
+        await lote.commit();
+        // El historial lleva el correo de la persona: se pasa al nuevo (si no, ella no vería su propio progreso).
+        for (const hojaP of ["Asignaciones", "Resultados"]) {
+            try {
+                const snap = await getDocs(query(collection(db, COLECCIONES[hojaP]), where("colaboradorEmail", "==", emailViejo)));
+                for (let i = 0; i < snap.docs.length; i += 400) {
+                    const l = writeBatch(db);
+                    snap.docs.slice(i, i + 400).forEach((d) => l.update(d.ref, { colaboradorEmail: emailNuevo, modificadoEn: ahora() }));
+                    await l.commit();
+                }
+            } catch (err) { console.warn(`[firestore] No se pudo pasar ${hojaP} al correo nuevo:`, err.code || err.message); }
+        }
+        await olvidarAlmacen("Usuarios"); await marcarBorrado("Usuarios");      // el documento viejo desapareció: los demás dispositivos rehacen la lista
+        await olvidarAlmacen("Asignaciones"); await marcarBorrado("Asignaciones");
+        invalidar("Usuarios"); invalidar("Asignaciones"); invalidar("Resultados");
+        return { ok: true, movido: true };
+    }
+
+    // El local que tenía la persona según la lista en memoria (undefined si no está cargada: ahí se revisa su historial por las dudas).
+    function localEnMemoria(email) {
+        const previo = (cache["Usuarios|"] && cache["Usuarios|"].datos || []).find((f) => String(f.email || "").toLowerCase() === String(email).toLowerCase());
+        return previo ? String(previo.sucursal || "") : undefined;
+    }
+    async function propagarSucursal(email, sucursal) {
+        try {
+            for (const hojaP of ["Asignaciones", "Resultados"]) {
+                const snap = await getDocs(query(collection(db, COLECCIONES[hojaP]), where("colaboradorEmail", "==", email.toLowerCase())));
+                const viejas = snap.docs.filter((d) => d.data().sucursal !== sucursal);
+                for (let i = 0; i < viejas.length; i += 400) {
+                    const lote = writeBatch(db);
+                    viejas.slice(i, i + 400).forEach((d) => lote.update(d.ref, { sucursal, modificadoEn: ahora() }));
+                    await lote.commit();
+                }
+                if (viejas.length) invalidar(hojaP);
+            }
+        } catch (err) {
+            console.warn("[firestore] No se pudo actualizar el local en el historial de la persona:", err.code || err.message);
+        }
     }
 
     async function deleteSheet(hoja, id /*, mockRows */) {
@@ -431,6 +755,8 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         const ref = await referenciaDeFila(hoja, id);
         if (!ref) return { ok: false };
         await confirmar(deleteDoc(ref));
+        await olvidarAlmacen(hoja);        // un borrado no se ve en una lectura incremental: la próxima va completa
+        await marcarBorrado(hoja);         // y los demás dispositivos se enteran al abrir (meta/borrados)
         invalidar(hoja);
         return { ok: true };
     }
@@ -724,6 +1050,8 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
             if (++enLote === 400) { await lote.commit(); lote = writeBatch(db); enLote = 0; }
         }
         if (enLote) await lote.commit();
+        await olvidarAlmacen(hoja);
+        await marcarBorrado(hoja);
         invalidar(hoja);
         return { ok: true, n: filas.length };
     }
@@ -781,5 +1109,11 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         return { ok: true, n: filas.length };
     }
 
-    return { fetchSheet, writeSheet, updateSheet, deleteSheet, invalidar, invalidarTodo, importarFilas, ejecutarAccion };
+    revisarPendientes();      // ¿quedaron escrituras sin enviar de la sesión anterior?
+    return {
+        fetchSheet, writeSheet, updateSheet, deleteSheet, invalidar, invalidarTodo, importarFilas, ejecutarAccion, cerrarEscuchas,
+        datosViejos: () => mostrandoDatosViejos,
+        pendientes: () => hayPendientes,
+        alCambiarPendientes: (f) => { oyentesPendientes.add(f); return () => oyentesPendientes.delete(f); },
+    };
 }

@@ -9,7 +9,7 @@ import { protegerMedia } from "./services/protegerMedia.js";
 import { autoExpandirTextareas } from "./services/autoExpandirTextareas.js";
 import { bindAvatarFallback } from "./components/avatar.js";
 import { iniciarChequeoDeVersion } from "./services/actualizacion.js";
-import { haySesion, getUsuarioActual, login, logout } from "./services/auth.js";
+import { haySesion, getUsuarioActual, login, logout, estaViendoComo } from "./services/auth.js";
 import { registrarSesionFirebase, registrarEjecutorAcciones } from "./services/sesionFirebase.js";
 import { revalidarPushSiYaEstaConcedido } from "./services/push.js";
 import "./services/google.js"; // Cargar antes de syncManager
@@ -54,16 +54,21 @@ async function initApp() {
         // pasa es lo que pasaba siempre. Y en cualquier arranque
         // posterior la pantalla sale al toque desde IndexedDB mientras
         // el sync se pone al día en segundo plano.
-        console.log('[APP] Initializing Sync Manager (en segundo plano)...');
-        window.syncManager.init().catch((err) => {
-            console.warn('[APP] Sync en segundo plano falló:', err);
-        });
+        // Con Firebase el sincronizador heredado (el de la app vieja contra Apps Script) no tiene nada que hacer:
+        // ya no se arranca. Las pantallas leen de firestoreSource.js, que cuida su propia copia en el dispositivo.
+        if (!USAR_FIRESTORE) {
+            console.log('[APP] Initializing Sync Manager (en segundo plano)...');
+            window.syncManager.init().catch((err) => {
+                console.warn('[APP] Sync en segundo plano falló:', err);
+            });
+        }
 
         if (USAR_FIRESTORE) {
             // Carga perezosa: con el interruptor apagado ni se descarga el SDK de Firebase.
             const { iniciarFirestore } = await import("./services/firestoreLoader.js");
             const { fuente, sesion } = await iniciarFirestore(getUsuarioActual);
             registrarFuenteFirestore(fuente);
+            import("./components/pendientesSync.js").then((m) => m.iniciarPendientesSync(fuente)).catch(() => {});
             registrarSesionFirebase(sesion);
             registrarEjecutorAcciones((accion, payload) => fuente.ejecutarAccion(accion, payload));
             // Si volvemos de una redirección de Google (celulares que bloquean la ventana), se completa acá.
@@ -74,6 +79,15 @@ async function initApp() {
             // La sesión de la app y la de Firebase tienen que ir juntas: si Firebase la perdió
             // (vencimiento, otro dispositivo, borrado de datos), las reglas negarían todo.
             if (haySesion() && !sesion.haySesionFirebase()) logout();
+            // Sesión ya abierta de antes (la de Firebase no vence): se deja el "Ingreso de X", se renueva el acceso por uso y se
+            // comprueba que la cuenta siga activa. En segundo plano y como mucho cada 6 h por dispositivo (services/chequeoAcceso.js).
+            if (haySesion() && !estaViendoComo()) {
+                Promise.all([import("./services/chequeoAcceso.js"), import("./data/auditoria.js")]).then(async ([{ chequearAccesoAlAbrir }, { registrarEvento }]) => {
+                    const r = await chequearAccesoAlAbrir({ sesion, usuario: getUsuarioActual(), registrarEvento });
+                    if (r.ok) login(r.usuario);
+                    else if (r.ok === false) { sessionStorage.setItem("faro_error_login", r.error); logout(); location.hash = "#/login"; location.reload(); }
+                }).catch((err) => console.warn("[APP] No se pudo revisar el acceso:", err));
+            }
             console.log('[APP] Firestore listo.');
         }
 
