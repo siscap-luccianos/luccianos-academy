@@ -1053,11 +1053,15 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
         });
     };
 
-    // El encabezado de una categoría refleja a sus productos: tildado si
-    // los tiene a todos, destildado si a ninguno, indeterminado si mezcla.
+    // Cada encabezado ("Catálogo", una categoría, "Lecciones", "Evaluaciones") refleja lo que tiene adentro: tildado si lo tiene todo,
+    // destildado si nada, guion si mezcla. Antes solo lo hacían las categorías y "Catálogo" quedaba destildado aunque casi todo
+    // estuviera tildado. Las categorías primero, porque "Catálogo" depende de ellas.
     const sincronizarCategorias = () => {
-        document.querySelectorAll('#arbol-contenido [data-rama^="cat-"]').forEach((cab) => {
+        const cabeceras = [...document.querySelectorAll("#arbol-contenido [data-rama]")]
+            .sort((x, y) => Number(!x.dataset.rama.startsWith("cat-")) - Number(!y.dataset.rama.startsWith("cat-")));
+        cabeceras.forEach((cab) => {
             const hijos = [...document.querySelectorAll(`[data-rama-de="${cab.dataset.rama}"]`)];
+            if (!hijos.length) return;
             const todos = hijos.every((h) => h.checked && !h.indeterminate);
             const ninguno = hijos.every((h) => !h.checked && !h.indeterminate);
             cab.checked = todos;
