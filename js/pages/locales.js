@@ -12,6 +12,7 @@ import { Table } from "../components/table.js";
 import { Modal, abrirModal, cerrarModal } from "../components/modal.js";
 import { getSucursales, getMisLocales, crearSucursal, actualizarSucursal, eliminarSucursal, listaSupervisores } from "../data/sucursales.js";
 import { supervisoresSinUsuario, supervisoresDelLocal } from "../services/supervisores.js";
+import { diagnostico, estadoEnAmbitos, alcanceTrasCambio } from "../services/alcanceContenido.js";
 import { getUsuarios } from "../data/usuarios.js";
 import { getCursos, actualizarCurso } from "../data/cursos.js";
 import { getLecciones, actualizarLeccion } from "../data/lecciones.js";
@@ -81,12 +82,12 @@ const TIPOS_RESTRICCION = [
 function contarRestricciones(items, local) {
     const porTipo = {};
     TIPOS_RESTRICCION.forEach(({ key }) => { porTipo[key] = { local: [], pais: [] }; });
-    items.forEach(({ nombre, tipo, noAplicaA }) => {
-        const lista = String(noAplicaA || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-        if (!lista.length) return;
-        const entrada = { nombre };
-        if (lista.includes(String(local.nombre).toLowerCase())) porTipo[tipo].local.push(entrada);
-        else if (local.pais && lista.includes(String(local.pais).toLowerCase())) porTipo[tipo].pais.push(entrada);
+    // Misma cuenta que usa la app para mostrar contenido (services/alcanceContenido.js): cuenta lo que excluye el local, lo que excluye su
+    // país y lo que "solo aplica a" otros (aplicaA). Antes solo leía noAplicaA y dejaba afuera, por ejemplo, las lecciones solo de Argentina.
+    items.forEach(({ nombre, tipo, noAplicaA, aplicaA }) => {
+        const d = diagnostico({ noAplicaA, aplicaA }, local.nombre, () => local.pais || "");
+        if (d.tiene) return;
+        porTipo[tipo][d.por === "propio" ? "local" : "pais"].push({ nombre });
     });
     return porTipo;
 }
@@ -287,11 +288,13 @@ export async function Locales() {
     // saca: la pill ya dice "Catálogo", no hace falta repetir de qué
     // módulo es cada producto ahí adentro también.
     const todosLosItems = [
-        ...cursos.map((c) => ({ nombre: c.nombre, tipo: "Cursos", noAplicaA: c.noAplicaA })),
-        ...lecciones.map((l) => ({ nombre: l.titulo, tipo: "Lecciones", noAplicaA: l.noAplicaA })),
-        ...disponibilidad.map((d) => ({ nombre: d.producto || d.curso, tipo: "Catálogo", noAplicaA: d.noAplicaA })),
-        ...preguntas.map((q) => ({ nombre: textoCorto(q.pregunta), tipo: "Evaluaciones", noAplicaA: q.noAplicaA })),
-    ].filter((it) => it.noAplicaA);
+        ...cursos.map((c) => ({ nombre: c.nombre, tipo: "Cursos", noAplicaA: c.noAplicaA, aplicaA: c.aplicaA })),
+        ...lecciones.map((l) => ({ nombre: l.titulo, tipo: "Lecciones", noAplicaA: l.noAplicaA, aplicaA: l.aplicaA })),
+        // En Disponibilidad hay filas que no son productos (ej. la lista de revisores de inglés guarda ids de personas en aplicaA):
+        // su aplicaA solo cuenta si la fila es de un curso con catálogo.
+        ...disponibilidad.map((d) => ({ nombre: d.producto || d.curso, tipo: "Catálogo", noAplicaA: d.noAplicaA, aplicaA: CATALOGO_POR_CURSO[d.curso] ? d.aplicaA : "" })),
+        ...preguntas.map((q) => ({ nombre: textoCorto(q.pregunta), tipo: "Evaluaciones", noAplicaA: q.noAplicaA, aplicaA: q.aplicaA })),
+    ].filter((it) => it.noAplicaA || it.aplicaA);
     locales.forEach((l) => { l._restricciones = contarRestricciones(todosLosItems, l); });
 
     const columnas = [
@@ -782,7 +785,7 @@ No tiene colaboradores asignados. Si algún Manual o News quedó dirigido puntua
         btn.addEventListener("click", async () => {
             const locales = await getSucursales();
             const local = locales.find((l) => String(l.id) === String(btn.dataset.modulos));
-            if (local) abrirModalContenido([local.nombre], local.nombre, local.pais || "");
+            if (local) abrirModalContenido([local.nombre], local.nombre);
         });
     });
 
@@ -828,7 +831,7 @@ No tiene colaboradores asignados. Si algún Manual o News quedó dirigido puntua
  * ni una fila. Argentina no se toca por tener 100 locales; se nombran
  * Devoto y Rivadavia dentro de Cafetería, y listo.
  */
-async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
+async function abrirModalContenido(ambitos, etiquetaAmbito) {
 
     if (!ambitos.length) return;
 
@@ -842,29 +845,21 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
         getCursos(), getLecciones(), getDisponibilidad(), getEvaluaciones(),
     ]);
     const modalId = "modal-contenido";
+    const sucursales = await getSucursales();
 
-    // Un ítem está EXCLUIDO de un ámbito si su noAplicaA lo nombra. Con
-    // varios ámbitos hay tres estados posibles, no dos: todos lo tienen,
-    // ninguno lo tiene, o mezclado. Mostrar "mezclado" como tildado
-    // sería mentir sobre lo que pasa en la mitad de los locales.
-    //
-    // Un LOCAL también hereda lo que su PAÍS excluye (si "Chile" figura en noAplicaA, ningún local de Chile lo tiene). Antes el
-    // modal de un local solo miraba su propio nombre y mostraba como habilitado lo que el país le saca, contradiciendo a la lista
-    // de Locales (que sí cuenta lo heredado). Lo heredado se muestra sin tildar y bloqueado: se cambia desde el país entero.
-    const listaDe = (noAplicaA) => String(noAplicaA || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    const esHeredado = (noAplicaA) => !!paisHeredado && listaDe(noAplicaA).includes(paisHeredado.toLowerCase())
-        && !ambitos.some((a) => listaDe(noAplicaA).includes(a.toLowerCase()));
-    const estado = (noAplicaA) => {
-        const lista = listaDe(noAplicaA);
-        if (esHeredado(noAplicaA)) return "no";
-        const excluidos = ambitos.filter((a) => lista.includes(a.toLowerCase())).length;
-        if (excluidos === 0) return "si";
-        if (excluidos === ambitos.length) return "no";
-        return "mezcla";
+    // Qué "tiene" cada ámbito (un local, varios locales o un país) sale de services/alcanceContenido.js: la MISMA cuenta que usa la app para
+    // mostrarle contenido a la gente y que usa la lista de Locales. Cuenta lo que excluye el propio ámbito, lo que excluye su PAÍS (un local
+    // hereda lo de su país) y lo que "solo aplica a" otros (aplicaA). Tildado = lo tiene; destildado = no lo tiene.
+    // Con varios ámbitos hay un tercer estado, "mezcla": mostrarlo como tildado sería mentir sobre la mitad de los locales.
+    // Lo que se pierde por el país o por "solo aplica a" lleva un aviso; si se lo tilda se habilita (para todo el país, si lo excluía el país).
+    const paisDeAmbito = (a) => { const l = sucursales.find((x) => x.nombre === a); return l ? String(l.pais || "") : ""; };
+    const paisesDeLosAmbitos = [...new Set(ambitos.map(paisDeAmbito).filter(Boolean))];
+    const attrs = (item) => {
+        const e = estadoEnAmbitos(item || {}, ambitos, paisDeAmbito);
+        return (e.estado === "si" ? "checked" : e.estado === "mezcla" ? "data-mezcla" : "")
+            + (soloLectura ? " disabled" : "")
+            + (e.heredado ? ` data-heredado data-herencia="${e.porPais ? "pais" : "solo"}" data-aplica="${escaparHtml((item && item.aplicaA) || "")}"` : "");
     };
-    const attrs = (est, noAplicaA) => (est === "si" ? "checked" : est === "mezcla" ? "data-mezcla" : "")
-        + (soloLectura || esHeredado(noAplicaA) ? " disabled" : "")
-        + (esHeredado(noAplicaA) ? ` data-heredado title="Excluido para todo ${escaparHtml(paisHeredado)}: se cambia desde el país"` : "");
 
     const productosDe = (nombreCurso) => (CATALOGO_POR_CURSO[nombreCurso] || [[]])[0];
     const categoriasDe = (nombreCurso) => (CATALOGO_POR_CURSO[nombreCurso] || [[], []])[1];
@@ -887,7 +882,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
                     ${misLecciones.map((l) => `
                         <label class="arbol-hoja">
                             <input type="checkbox" data-tipo="leccion" data-id="${l.id}"
-                                   data-rama-de="lecciones-${curso.id}" ${attrs(estado(l.noAplicaA), l.noAplicaA)}>
+                                   data-rama-de="lecciones-${curso.id}" ${attrs(l)}>
                             <span>${escaparHtml(l.titulo)}</span>
                         </label>`).join("")}
                 </div>
@@ -906,7 +901,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
                     ${misPreguntas.map((q) => `
                         <label class="arbol-hoja" title="${escaparHtml(q.pregunta)}">
                             <input type="checkbox" data-tipo="pregunta" data-id="${q.id}"
-                                   data-rama-de="preguntas-${curso.id}" ${attrs(estado(q.noAplicaA), q.noAplicaA)}>
+                                   data-rama-de="preguntas-${curso.id}" ${attrs(q)}>
                             <span>${escaparHtml(textoCorto(q.pregunta))}</span>
                         </label>`).join("")}
                 </div>
@@ -937,7 +932,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
                                 <label class="arbol-hoja">
                                     <input type="checkbox" data-tipo="producto" data-curso="${escaparHtml(curso.nombre)}"
                                            data-id="${escaparHtml(clave)}" data-nombre="${escaparHtml(prod.nombre)}" data-rama-de="cat-${curso.id}-${gi}"
-                                           ${attrs(estado(alcanceDe(alc, prod, misProductos).noAplicaA), alcanceDe(alc, prod, misProductos).noAplicaA)}>
+                                           ${attrs(alcanceDe(alc, prod, misProductos))}>
                                     ${prod.foto ? `<img class="arbol-foto" src="${escaparHtml(prod.foto)}" alt="" loading="lazy">` : ""}
                                     <span>${escaparHtml(prod.nombre)}</span>${aclaracion}
                                 </label>`;
@@ -949,7 +944,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
         return `
             <div class="arbol-modulo">
                 <label class="arbol-raiz">
-                    <input type="checkbox" data-tipo="curso" data-id="${curso.id}" ${attrs(estado(curso.noAplicaA), curso.noAplicaA)}>
+                    <input type="checkbox" data-tipo="curso" data-id="${curso.id}" ${attrs(curso)}>
                     <span class="arbol-raiz-nombre">${escaparHtml(curso.nombre)}</span>
                     <span class="arbol-meta">${escaparHtml(curso.categoria)}</span>
                 </label>
@@ -966,7 +961,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
                 : `Destildá lo que <strong>${escaparHtml(etiquetaAmbito)}</strong>
                    ${ambitos.length === 1 ? "no tiene" : "no tienen"}. Lo que no toques queda como está.`}
         </p>
-        ${paisHeredado ? `<p class="text-xs text-muted" style="margin-bottom:10px">Lo que aparece sin tildar y bloqueado está excluido para todo <strong>${escaparHtml(paisHeredado)}</strong> y este local lo hereda. Para habilitarlo: en Locales filtrá por ${escaparHtml(paisHeredado)}, tildá "Seleccionar todos los visibles" y abrí "Contenido".</p>` : ""}
+        <p class="text-xs text-muted" style="margin-bottom:10px">Tildado = lo tiene. Destildado = no lo tiene.${paisesDeLosAmbitos.length ? ` Lo que dice <strong>"excluido en ${escaparHtml(paisesDeLosAmbitos.join(", "))}"</strong> o <strong>"solo aplica a…"</strong> lo hereda de su país o de su alcance: si lo tildás, se habilita (si lo excluía el país, en <strong>todos</strong> los locales de ${escaparHtml(paisesDeLosAmbitos.join(", "))}; te pedimos confirmación al guardar).` : ""}</p>
         <input type="search" id="buscador-arbol" placeholder="Buscar módulo, lección, producto o pregunta...">
         <div id="arbol-contenido" style="margin-top:14px">${bloques}</div>
     `;
@@ -989,6 +984,11 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
 
             if (!cambios.length) { cerrarModal(modalId); return; }
 
+            // Tildar algo que el PAÍS excluye lo habilita en todos los locales del país: se pide confirmar con el número a la vista.
+            const habilitadosDelPais = cambios.filter((c) => c.checked && c.dataset.herencia === "pais").length;
+            const localesAfectados = sucursales.filter((l) => paisesDeLosAmbitos.includes(l.pais)).length;
+            if (habilitadosDelPais && !confirm(`Vas a habilitar ${habilitadosDelPais} ítem(s) que hoy están excluidos para todo ${paisesDeLosAmbitos.join(", ")}.\n\nSe habilitan en TODOS los locales de ${paisesDeLosAmbitos.join(", ")} (${localesAfectados}), no solo en los que elegiste.\n\n¿Continuar?`)) return;
+
             boton.disabled = true;
             for (let i = 0; i < cambios.length; i++) {
                 const chk = cambios[i];
@@ -996,20 +996,20 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
 
                 if (chk.dataset.tipo === "curso") {
                     const curso = cursos.find((c) => String(c.id) === chk.dataset.id);
-                    await actualizarCurso(curso.id, { noAplicaA: conAmbitos(curso.noAplicaA, ambitos, chk.checked) });
+                    await actualizarCurso(curso.id, alcanceTrasCambio(curso, ambitos, paisDeAmbito, chk.checked));
                 } else if (chk.dataset.tipo === "pregunta") {
                     const q = preguntas.find((x) => String(x.id) === chk.dataset.id);
-                    await actualizarPregunta(q.id, { noAplicaA: conAmbitos(q.noAplicaA, ambitos, chk.checked) });
+                    await actualizarPregunta(q.id, alcanceTrasCambio(q, ambitos, paisDeAmbito, chk.checked));
                 } else if (chk.dataset.tipo === "leccion") {
                     const lec = lecciones.find((l) => String(l.id) === chk.dataset.id);
-                    await actualizarLeccion(lec.id, { noAplicaA: conAmbitos(lec.noAplicaA, ambitos, chk.checked) });
+                    await actualizarLeccion(lec.id, alcanceTrasCambio(lec, ambitos, paisDeAmbito, chk.checked));
                 } else {
                     const mapa = alcances(chk.dataset.curso);
                     // Si todavía no tiene fila propia, parte de la vieja (por nombre solo)
                     // para no perder otros países que ya estaban destildados ahí.
                     const actual = mapa.get(chk.dataset.id) || mapa.get(chk.dataset.nombre) || {};
                     await guardarDisponibilidad(chk.dataset.curso, chk.dataset.id,
-                        { noAplicaA: conAmbitos(actual.noAplicaA, ambitos, chk.checked) }, disponibilidad);
+                        alcanceTrasCambio(actual, ambitos, paisDeAmbito, chk.checked), disponibilidad);
                 }
             }
 
@@ -1019,6 +1019,16 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
             navigate("locales");
         },
     );
+
+    // Lo heredado del país lleva su aviso al lado del nombre, para no confundirlo con una exclusión propia del local.
+    document.querySelectorAll("#arbol-contenido [data-heredado]").forEach((chk) => {
+        const fila = chk.closest("label");
+        if (!fila || fila.querySelector(".tag-heredado")) return;
+        const marca = document.createElement("span");
+        marca.className = "arbol-meta tag-heredado";
+        marca.textContent = chk.dataset.herencia === "pais" ? ` · excluido en ${paisesDeLosAmbitos.join(", ")}` : ` · solo aplica a ${chk.dataset.aplica || "otros"}`;
+        fila.appendChild(marca);
+    });
 
     // Los "mezcla" arrancan indeterminados: ni tildado ni destildado.
     document.querySelectorAll("#arbol-contenido [data-mezcla]").forEach((chk) => { chk.indeterminate = true; });
@@ -1037,7 +1047,6 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
     // bajando hasta los productos.
     const arrastrar = (rama, valor) => {
         document.querySelectorAll(`[data-rama-de="${rama}"]`).forEach((chk) => {
-            if (chk.dataset.heredado !== undefined) return;       // lo que el país excluye no se toca desde un local
             chk.indeterminate = false;
             chk.checked = valor;
             if (chk.dataset.rama) arrastrar(chk.dataset.rama, valor);
@@ -1087,12 +1096,6 @@ async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
 }
 
 /** Agrega o saca varios ámbitos de una lista separada por comas. */
-function conAmbitos(actual, ambitos, loTiene) {
-    const lista = String(actual || "").split(",").map((s) => s.trim()).filter(Boolean);
-    const bajos = ambitos.map((a) => a.toLowerCase());
-    const sinEstos = lista.filter((s) => !bajos.includes(s.toLowerCase()));
-    return (loTiene ? sinEstos : [...sinEstos, ...ambitos]).join(", ");
-}
 
 // Un local puede tener MÁS DE UN supervisor a cargo (ej. dos que
 // comparten un local grande, o cobertura de vacaciones — mismo
