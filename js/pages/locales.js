@@ -782,7 +782,7 @@ No tiene colaboradores asignados. Si algún Manual o News quedó dirigido puntua
         btn.addEventListener("click", async () => {
             const locales = await getSucursales();
             const local = locales.find((l) => String(l.id) === String(btn.dataset.modulos));
-            if (local) abrirModalContenido([local.nombre], local.nombre);
+            if (local) abrirModalContenido([local.nombre], local.nombre, local.pais || "");
         });
     });
 
@@ -828,7 +828,7 @@ No tiene colaboradores asignados. Si algún Manual o News quedó dirigido puntua
  * ni una fila. Argentina no se toca por tener 100 locales; se nombran
  * Devoto y Rivadavia dentro de Cafetería, y listo.
  */
-async function abrirModalContenido(ambitos, etiquetaAmbito) {
+async function abrirModalContenido(ambitos, etiquetaAmbito, paisHeredado = "") {
 
     if (!ambitos.length) return;
 
@@ -847,15 +847,24 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
     // varios ámbitos hay tres estados posibles, no dos: todos lo tienen,
     // ninguno lo tiene, o mezclado. Mostrar "mezclado" como tildado
     // sería mentir sobre lo que pasa en la mitad de los locales.
+    //
+    // Un LOCAL también hereda lo que su PAÍS excluye (si "Chile" figura en noAplicaA, ningún local de Chile lo tiene). Antes el
+    // modal de un local solo miraba su propio nombre y mostraba como habilitado lo que el país le saca, contradiciendo a la lista
+    // de Locales (que sí cuenta lo heredado). Lo heredado se muestra sin tildar y bloqueado: se cambia desde el país entero.
+    const listaDe = (noAplicaA) => String(noAplicaA || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const esHeredado = (noAplicaA) => !!paisHeredado && listaDe(noAplicaA).includes(paisHeredado.toLowerCase())
+        && !ambitos.some((a) => listaDe(noAplicaA).includes(a.toLowerCase()));
     const estado = (noAplicaA) => {
-        const lista = String(noAplicaA || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const lista = listaDe(noAplicaA);
+        if (esHeredado(noAplicaA)) return "no";
         const excluidos = ambitos.filter((a) => lista.includes(a.toLowerCase())).length;
         if (excluidos === 0) return "si";
         if (excluidos === ambitos.length) return "no";
         return "mezcla";
     };
-    const attrs = (est) => (est === "si" ? "checked" : est === "mezcla" ? "data-mezcla" : "")
-        + (soloLectura ? " disabled" : "");
+    const attrs = (est, noAplicaA) => (est === "si" ? "checked" : est === "mezcla" ? "data-mezcla" : "")
+        + (soloLectura || esHeredado(noAplicaA) ? " disabled" : "")
+        + (esHeredado(noAplicaA) ? ` data-heredado title="Excluido para todo ${escaparHtml(paisHeredado)}: se cambia desde el país"` : "");
 
     const productosDe = (nombreCurso) => (CATALOGO_POR_CURSO[nombreCurso] || [[]])[0];
     const categoriasDe = (nombreCurso) => (CATALOGO_POR_CURSO[nombreCurso] || [[], []])[1];
@@ -878,7 +887,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
                     ${misLecciones.map((l) => `
                         <label class="arbol-hoja">
                             <input type="checkbox" data-tipo="leccion" data-id="${l.id}"
-                                   data-rama-de="lecciones-${curso.id}" ${attrs(estado(l.noAplicaA))}>
+                                   data-rama-de="lecciones-${curso.id}" ${attrs(estado(l.noAplicaA), l.noAplicaA)}>
                             <span>${escaparHtml(l.titulo)}</span>
                         </label>`).join("")}
                 </div>
@@ -897,7 +906,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
                     ${misPreguntas.map((q) => `
                         <label class="arbol-hoja" title="${escaparHtml(q.pregunta)}">
                             <input type="checkbox" data-tipo="pregunta" data-id="${q.id}"
-                                   data-rama-de="preguntas-${curso.id}" ${attrs(estado(q.noAplicaA))}>
+                                   data-rama-de="preguntas-${curso.id}" ${attrs(estado(q.noAplicaA), q.noAplicaA)}>
                             <span>${escaparHtml(textoCorto(q.pregunta))}</span>
                         </label>`).join("")}
                 </div>
@@ -928,7 +937,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
                                 <label class="arbol-hoja">
                                     <input type="checkbox" data-tipo="producto" data-curso="${escaparHtml(curso.nombre)}"
                                            data-id="${escaparHtml(clave)}" data-nombre="${escaparHtml(prod.nombre)}" data-rama-de="cat-${curso.id}-${gi}"
-                                           ${attrs(estado(alcanceDe(alc, prod, misProductos).noAplicaA))}>
+                                           ${attrs(estado(alcanceDe(alc, prod, misProductos).noAplicaA), alcanceDe(alc, prod, misProductos).noAplicaA)}>
                                     ${prod.foto ? `<img class="arbol-foto" src="${escaparHtml(prod.foto)}" alt="" loading="lazy">` : ""}
                                     <span>${escaparHtml(prod.nombre)}</span>${aclaracion}
                                 </label>`;
@@ -940,7 +949,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
         return `
             <div class="arbol-modulo">
                 <label class="arbol-raiz">
-                    <input type="checkbox" data-tipo="curso" data-id="${curso.id}" ${attrs(estado(curso.noAplicaA))}>
+                    <input type="checkbox" data-tipo="curso" data-id="${curso.id}" ${attrs(estado(curso.noAplicaA), curso.noAplicaA)}>
                     <span class="arbol-raiz-nombre">${escaparHtml(curso.nombre)}</span>
                     <span class="arbol-meta">${escaparHtml(curso.categoria)}</span>
                 </label>
@@ -957,6 +966,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
                 : `Destildá lo que <strong>${escaparHtml(etiquetaAmbito)}</strong>
                    ${ambitos.length === 1 ? "no tiene" : "no tienen"}. Lo que no toques queda como está.`}
         </p>
+        ${paisHeredado ? `<p class="text-xs text-muted" style="margin-bottom:10px">Lo que aparece sin tildar y bloqueado está excluido para todo <strong>${escaparHtml(paisHeredado)}</strong> y este local lo hereda. Para habilitarlo: en Locales filtrá por ${escaparHtml(paisHeredado)}, tildá "Seleccionar todos los visibles" y abrí "Contenido".</p>` : ""}
         <input type="search" id="buscador-arbol" placeholder="Buscar módulo, lección, producto o pregunta...">
         <div id="arbol-contenido" style="margin-top:14px">${bloques}</div>
     `;
@@ -1027,6 +1037,7 @@ async function abrirModalContenido(ambitos, etiquetaAmbito) {
     // bajando hasta los productos.
     const arrastrar = (rama, valor) => {
         document.querySelectorAll(`[data-rama-de="${rama}"]`).forEach((chk) => {
+            if (chk.dataset.heredado !== undefined) return;       // lo que el país excluye no se toca desde un local
             chk.indeterminate = false;
             chk.checked = valor;
             if (chk.dataset.rama) arrastrar(chk.dataset.rama, valor);
