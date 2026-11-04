@@ -75,6 +75,9 @@ import { cursosDeLaPersona, cursoAplicaAPersona } from "../services/alcance.js";
 
 const DIAS_AVISO_VENCIMIENTO = 7;
 
+// Personas del local del Responsable a las que todavía se les puede pedir la baja (las arma Colaboradores() para el botón "− Pedir baja").
+let personasParaBaja = [];
+
 function diasEntre(desdeISO, hastaISO) {
     const [y1, m1, d1] = desdeISO.split("-").map(Number);
     const [y2, m2, d2] = hastaISO.split("-").map(Number);
@@ -769,6 +772,8 @@ export async function Colaboradores() {
             const soyYo = String(c.email).toLowerCase() === String(usuario.email).toLowerCase();
             c._pedirBaja = soyYo || c.activo !== "SI" ? "" : bajasPedidas.has(String(c.id)) ? "pedida" : "si";
         });
+        personasParaBaja = colaboradores.filter((c) => c._pedirBaja === "si").map((c) => ({ id: c.id, nombre: c.nombre, email: c.email }))
+            .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
         // Puede haber más de uno (cobertura de vacaciones, locales
         // grandes) — la columna es una lista separada por comas.
         const sucursales = await getSucursales();
@@ -980,7 +985,11 @@ export async function Colaboradores() {
                 <button class="btn btn-secondary" id="btn-elegir-locales">📍 Elegir mis locales</button><span class="mod-tooltip kpi-ayuda" data-tooltip-texto="${escaparHtml(textoAyudaElegirLocales(usuario, esAdmin))}">ⓘ</span>
             ` : ""}
             ${puedeRegistrar ? `<button class="btn btn-primary" id="btn-registrar-colaborador" data-toolbar-rol="colaborador">+ Registrar colaborador</button>` : ""}
-            ${esEncargado ? `<button class="btn btn-primary" id="btn-pedir-alta">+ Pedir alta</button>` : ""}
+            ${esEncargado ? `
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    <button class="btn" id="btn-pedir-alta" style="background:var(--success);color:#06210f;font-weight:700">+ Pedir alta</button>
+                    <button class="btn" id="btn-pedir-baja" style="background:var(--danger);color:#2b0b07;font-weight:700">− Pedir baja</button>
+                </div>` : ""}
             ${esAdmin ? `<button class="btn btn-primary" id="btn-nuevo-supervisor" data-toolbar-rol="supervisor" hidden>+ Nuevo supervisor</button>` : ""}
             ${esAdmin ? `<button class="btn btn-primary" id="btn-nuevo-admin" data-toolbar-rol="admin" hidden>+ Nuevo admin</button>` : ""}
         </div>
@@ -1521,6 +1530,7 @@ export function bindColaboradores() {
         navigate("colaboradores", { replace: true });
     }));
     document.getElementById("btn-pedir-alta")?.addEventListener("click", abrirModalPedirAlta);
+    document.getElementById("btn-pedir-baja")?.addEventListener("click", abrirModalPedirBaja);
 
     const btnRegistrar = document.getElementById("btn-registrar-colaborador");
     if (btnRegistrar) {
@@ -1791,6 +1801,29 @@ function abrirModalPedirAlta() {
         if (!nombre || !email) { alert("Completá el nombre y el correo."); return; }
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert(`"${email}" no parece un correo válido (ej: nombre@gmail.com).`); return; }
         try { await pedirAlta({ nombre, email, rol }); }
+        catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
+        cerrarModal(modalId);
+        alert("Pedido enviado. El Administrador lo va a revisar.");
+        navigate("colaboradores", { replace: true });
+    });
+}
+
+/** Responsable de local: pide la baja de una persona de SU local, elegida de una lista. */
+function abrirModalPedirBaja() {
+    if (!personasParaBaja.length) { alert("No hay personas a las que se les pueda pedir la baja (todas ya tienen un pedido o están inactivas)."); return; }
+    const modalId = "modal-pedir-baja";
+    const contenidoHtml = `
+        <label for="input-baja-persona">Persona</label>
+        <select id="input-baja-persona">
+            ${personasParaBaja.map((p) => `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nombre)}</option>`).join("")}
+        </select>
+        <p class="text-xs text-muted" style="margin-top:10px">El Administrador revisa el pedido. Hasta que lo apruebe, la persona sigue con acceso.</p>
+    `;
+    abrirModal(Modal({ id: modalId, titulo: "Pedir baja", contenidoHtml, textoConfirmar: "Enviar pedido" }), modalId, async () => {
+        const id = document.getElementById("input-baja-persona").value;
+        const persona = personasParaBaja.find((p) => String(p.id) === String(id));
+        if (!persona) return;
+        try { await pedirBaja({ usuarioId: persona.id, nombre: persona.nombre, email: persona.email }); }
         catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
         cerrarModal(modalId);
         alert("Pedido enviado. El Administrador lo va a revisar.");
