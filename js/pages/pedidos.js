@@ -33,8 +33,10 @@ export async function Pedidos() {
         return {
             tipo: TIPO_PILL[p.tipo] || escaparHtml(p.tipo),
             local: escaparHtml(p.sucursal),
-            persona: `${escaparHtml(p.nombre)}${p.tipo === "alta" ? `<div class="text-xs text-muted">${escaparHtml(p.email)} · ${escaparHtml(p.rol)}</div>` : ""}
+            persona: `${escaparHtml(p.nombre)}${p.tipo === "alta" ? `<div class="text-xs text-muted">${escaparHtml(p.rol)}</div>` : ""}
                 ${aviso ? `<div class="text-xs" style="color:var(--warning)">⚠ ${escaparHtml(aviso)}</div>` : ""}`,
+            // El correo es lo primero que se mira antes de aprobar un alta (tiene que ser exacto): va en su propia columna, bien visible.
+            correo: p.email ? `<strong>${escaparHtml(p.email)}</strong>` : `<span class="text-muted">—</span>`,
             pidio: `<span class="text-sm">${escaparHtml(p.pedidoPorNombre || p.pedidoPorEmail)}</span>`,
             acciones: `<button class="btn btn-primary" style="width:auto;padding:6px 14px" data-aprobar="${escaparHtml(p.id)}" ${bloqueado ? "disabled title=\"Resolvé el aviso o rechazalo\"" : ""}>Aprobar</button>
                 <button class="btn btn-secondary" style="width:auto;padding:6px 14px" data-rechazar="${escaparHtml(p.id)}">Rechazar</button>`,
@@ -43,6 +45,7 @@ export async function Pedidos() {
 
     const columnas = [
         { key: "tipo", label: "Tipo" }, { key: "local", label: "Local" }, { key: "persona", label: "Persona" },
+        { key: "correo", label: "Correo" },
         { key: "pidio", label: "Lo pidió" }, { key: "acciones", label: "" },
     ];
 
