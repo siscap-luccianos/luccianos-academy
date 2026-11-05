@@ -71,6 +71,7 @@ import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
 import { DIAS_ACCESO_INICIAL, fechaHoyISO, sumarDias } from "../services/fechasAcceso.js";
 import { getPedidosPendientes, pedirAlta, pedirBaja } from "../data/pedidos.js";
+import { SelectorBuscable, bindSelectorBuscable, valorSelectorBuscable } from "../components/selectorBuscable.js";
 import { cursosDeLaPersona, cursoAplicaAPersona } from "../services/alcance.js";
 
 const DIAS_AVISO_VENCIMIENTO = 7;
@@ -1795,8 +1796,8 @@ async function abrirModalPedirAlta() {
     const locales = esCapacitador ? (await getSucursales()).map((s) => s.nombre).sort((a, b) => a.localeCompare(b, "es")) : [];
     const contenidoHtml = `
         ${esCapacitador ? `
-            <label for="input-pedido-local">Local</label>
-            <select id="input-pedido-local">${locales.map((n) => `<option value="${escaparHtml(n)}">${escaparHtml(n)}</option>`).join("")}</select>
+            <label for="selector-local-buscar">Local</label>
+            ${SelectorBuscable({ id: "selector-local", placeholder: "Buscar local...", opciones: locales.map((n) => ({ valor: n, etiqueta: n.replace("Lucciano's ", "") })) })}
         ` : ""}
 
         <label for="input-pedido-nombre">Nombre completo</label>
@@ -1817,36 +1818,48 @@ async function abrirModalPedirAlta() {
         const rol = document.getElementById("input-pedido-rol").value;
         if (!nombre || !email) { alert("Completá el nombre y el correo."); return; }
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert(`"${email}" no parece un correo válido (ej: nombre@gmail.com).`); return; }
-        const sucursal = esCapacitador ? document.getElementById("input-pedido-local").value : undefined;
+        const sucursal = esCapacitador ? valorSelectorBuscable("selector-local") : undefined;
+        if (esCapacitador && !sucursal) { alert("Elegí el local de la lista."); return; }
         try { await pedirAlta({ nombre, email, rol, sucursal }); }
         catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
         cerrarModal(modalId);
         alert("Pedido enviado. El Administrador lo va a revisar.");
         navigate("colaboradores", { replace: true });
     });
+    if (esCapacitador) bindSelectorBuscable("selector-local");
 }
 
 /** Responsable de local: pide la baja de una persona de SU local, elegida de una lista. */
 function abrirModalPedirBaja() {
     if (!personasParaBaja.length) { alert("No hay personas a las que se les pueda pedir la baja (todas ya tienen un pedido o están inactivas)."); return; }
     const modalId = "modal-pedir-baja";
+    const verLocal = getUsuarioActual().capacitador === true;       // un Responsable de local ve solo su local: no hace falta repetirlo
     const contenidoHtml = `
-        <label for="input-baja-persona">Persona</label>
-        <select id="input-baja-persona">
-            ${personasParaBaja.map((p) => `<option value="${escaparHtml(p.id)}">${escaparHtml(p.nombre)}${getUsuarioActual().capacitador ? ` — ${escaparHtml(String(p.sucursal).replace("Lucciano's ", ""))}` : ""}</option>`).join("")}
-        </select>
+        <label for="selector-baja-buscar">Persona</label>
+        ${SelectorBuscable({
+            id: "selector-baja",
+            placeholder: verLocal ? "Buscar por nombre, correo o local..." : "Buscar por nombre o correo...",
+            opciones: personasParaBaja.map((p) => ({
+                valor: p.id,
+                etiqueta: p.nombre,
+                // El correo no se muestra pero se busca: sirve para encontrar a alguien por su Gmail.
+                detalle: verLocal ? String(p.sucursal).replace("Lucciano's ", "") : "",
+                extra: p.email,
+            })),
+        })}
         <p class="text-xs text-muted" style="margin-top:10px">El Administrador revisa el pedido. Hasta que lo apruebe, la persona sigue con acceso.</p>
     `;
     abrirModal(Modal({ id: modalId, titulo: "Pedir baja", contenidoHtml, textoConfirmar: "Enviar pedido" }), modalId, async () => {
-        const id = document.getElementById("input-baja-persona").value;
+        const id = valorSelectorBuscable("selector-baja");
         const persona = personasParaBaja.find((p) => String(p.id) === String(id));
-        if (!persona) return;
+        if (!persona) { alert("Elegí a la persona de la lista."); return; }
         try { await pedirBaja({ usuarioId: persona.id, nombre: persona.nombre, email: persona.email, sucursal: persona.sucursal }); }
         catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
         cerrarModal(modalId);
         alert("Pedido enviado. El Administrador lo va a revisar.");
         navigate("colaboradores", { replace: true });
     });
+    bindSelectorBuscable("selector-baja");
 }
 
 /** Alta/edición de Supervisor o Admin — mucho más simple que el modal
