@@ -198,7 +198,7 @@ function selectorDeLocal(usuario) {
     return `
         <div class="selector-local-activo">
             <label for="selector-local-activo">Estoy en el local</label>
-            <select id="selector-local-activo">
+            <select id="selector-local-activo" title="En qué local estás">
                 ${locales.map((n) => `<option value="${n.replace(/"/g, "&quot;")}"${n === usuario.sucursal ? " selected" : ""}>${corto(n)}</option>`).join("")}
             </select>
         </div>
