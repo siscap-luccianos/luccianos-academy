@@ -80,9 +80,20 @@ export async function Pedidos() {
 
 async function mostrarHistorial() {
     const cont = document.getElementById("historial-pedidos");
+    const boton = document.getElementById("btn-ver-historial");
+    // Segundo toque: se cierra. El botón cambia de texto para que se entienda que abre y cierra.
+    if (cont.dataset.abierto === "si") {
+        cont.innerHTML = "";
+        cont.dataset.abierto = "no";
+        boton.textContent = "Ver historial de pedidos";
+        return;
+    }
+    cont.dataset.abierto = "si";
+    boton.textContent = "Ocultar historial";
     cont.innerHTML = `<p class="text-sm text-muted">Cargando...</p>`;
     invalidar(HOJAS.PEDIDOS_HISTORIAL);
     const resueltos = await getPedidosResueltos();
+    if (cont.dataset.abierto !== "si") return;      // lo cerró mientras cargaba
     if (!resueltos.length) { cont.innerHTML = `<p class="text-sm text-muted">Todavía no hay pedidos resueltos.</p>`; return; }
     const filas = resueltos.map((p) => ({
         cuando: fmtFecha(p.resueltoEn),
