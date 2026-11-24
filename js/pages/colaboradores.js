@@ -69,6 +69,7 @@ import { Avatar } from "../components/avatar.js";
 import { celdaPct, estadoEvaluacion, progresoCursoDePersona, barraProgreso, leccionesDePersona, kpisSemaforo } from "./reportes.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
+import { listaDeLocales } from "../services/localActivo.js";
 import { DIAS_ACCESO_INICIAL, fechaHoyISO, sumarDias } from "../services/fechasAcceso.js";
 import { getPedidosPendientes, pedirAlta, pedirBaja } from "../data/pedidos.js";
 import { SelectorBuscable, bindSelectorBuscable, valorSelectorBuscable } from "../components/selectorBuscable.js";
@@ -1666,6 +1667,11 @@ async function abrirModalEditar(colaborador) {
         ${campoSucursal.html}
 
         ${camposLiderazgo(colaborador)}
+
+        <div id="bloque-locales-extra" style="display:none">
+            <label>También gestiona estos locales <span class="text-xs text-muted">— además del principal. Desde el menú elige en cuál está.</span></label>
+            ${MultiSelectSucursales("input-locales-extra", colaborador.sucursalesExtra || [])}
+        </div>
     `;
 
     abrirModal(Modal({ id: modalId, titulo: "Editar colaborador", contenidoHtml, textoConfirmar: "Guardar" }), modalId, async () => {
@@ -1687,7 +1693,11 @@ async function abrirModalEditar(colaborador) {
 
         await asegurarSucursalAsignada(sucursal, usuario);
         if (campoSucursal.leerSupervisor) await asignarSupervisorASucursal(sucursal, campoSucursal.leerSupervisor());
-        await actualizarUsuario(colaborador.id, { nombre, email, sucursal, encargado: encargado ? "SI" : "NO", responsableTurno: responsableTurno ? "SI" : "NO" });
+        // Locales extra: solo para quien está a cargo de un local o de un turno, y sin repetir el principal.
+        const extras = (encargado || responsableTurno)
+            ? listaDeLocales(document.getElementById("input-locales-extra").value).filter((n) => n !== sucursal)
+            : [];
+        await actualizarUsuario(colaborador.id, { nombre, email, sucursal, encargado: encargado ? "SI" : "NO", responsableTurno: responsableTurno ? "SI" : "NO", sucursalesExtra: extras.join(",") });
         registrarEvento(usuario.id, "editar_colaborador", `Datos corregidos de ${nombre} (antes: ${colaborador.nombre})`);
 
         cerrarModal(modalId);
@@ -1696,6 +1706,15 @@ async function abrirModalEditar(colaborador) {
 
     campoSucursal.bind();
     bindLiderazgo();
+    bindMultiSelectSucursales("input-locales-extra");
+    // El bloque de locales extra aparece solo si la persona está a cargo de un local o de un turno.
+    const bloqueExtra = document.getElementById("bloque-locales-extra");
+    const marcaLocal = document.getElementById("input-encargado");
+    const marcaTurno = document.getElementById("input-responsable-turno");
+    const mostrarExtra = () => { bloqueExtra.style.display = (marcaLocal.checked || marcaTurno.checked) ? "" : "none"; };
+    marcaLocal.addEventListener("change", mostrarExtra);
+    marcaTurno.addEventListener("change", mostrarExtra);
+    mostrarExtra();
 }
 
 /* Las dos etiquetas de liderazgo de un colaborador.

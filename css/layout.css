@@ -788,6 +788,32 @@
     width:100%;
 }
 
+/* Selector de local de un Responsable que gestiona más de uno */
+.selector-local-activo{
+    margin:0 0 18px;
+    padding:12px 12px 14px;
+    border-radius:12px;
+    background:rgba(224,169,59,.12);
+    border:1px solid rgba(224,169,59,.35);
+}
+.selector-local-activo label{
+    display:block;
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:#e0a93b;
+    margin-bottom:6px;
+}
+.selector-local-activo select{
+    width:100%;
+    padding:9px 10px;
+    border-radius:8px;
+    border:1px solid #444;
+    background:#1a1a1a;
+    color:#fff;
+    font-size:14px;
+}
+
 .sidebar-footer{
     margin-top:auto;
     padding-top:20px;

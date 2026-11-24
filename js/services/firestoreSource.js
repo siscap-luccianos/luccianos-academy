@@ -100,6 +100,7 @@ export function desdeFirestore(hoja, data, idDelDoc) {
     if (hoja === "Usuarios") {
         FLAGS_USUARIO.forEach((k) => { if (k in fila) fila[k] = fila[k] === true ? "SI" : "NO"; });
         fila.fechaVencimientoAcceso = timestampAFecha(fila.fechaVencimientoAcceso);
+        if (Array.isArray(fila.sucursalesExtra)) fila.sucursalesExtra = fila.sucursalesExtra.join(",");   // texto en la planilla, lista en Firestore
         fila._clave = idDelDoc;       // con qué clave está guardado el documento: para entrar tiene que ser igual al correo (ver cambiarCorreoDeUsuario)
     }
     // "leidoPor" es texto en la planilla ("1,46,30") y arreglo en Firestore.
@@ -186,7 +187,9 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
     let ignorarCopiasAntesDe = 0;          // botón de actualizar: ninguna copia anterior a este instante vale
     const ignorarHojaAntesDe = {};         // escritura propia en una hoja: ninguna copia anterior de esa hoja vale
     let mostrandoDatosViejos = false;
-    const claveCopia = (hoja) => `cp|${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
+    // Quien gestiona más de un local baja datos distintos en cada uno: la copia guardada lleva también el local en el que está.
+    const sufijoLocal = () => { const u = getUsuario(); return u && Array.isArray(u.sucursalesExtra) && u.sucursalesExtra.length ? `|${u.sucursal || ""}` : ""; };
+    const claveCopia = (hoja) => `cp|${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}${sufijoLocal()}|${hoja}`;
     const copiable = (hoja) => !!almacen && cacheMs > 0 && COPIABLES.includes(hoja);
     function frescuraDe(hoja) {
         if (hoja === "Sucursales") return FRESCURA_SUCURSALES_MS;       // de acá sale "qué locales supervisa cada uno": una corrección tiene que llegar rápido
@@ -201,7 +204,7 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         try { await almacen.guardar(claveCopia(hoja), { filas, guardadoEn: ahora(), extra }); } catch (err) { /* sin copia */ }
     }
     const copiaVale = (hoja, c) => c.guardadoEn > ignorarCopiasAntesDe && c.guardadoEn > (ignorarHojaAntesDe[hoja] || 0) && ahora() - c.guardadoEn < frescuraDe(hoja) && ahora() >= c.guardadoEn;
-    const claveAlmacen = (hoja) => `${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
+    const claveAlmacen = (hoja) => `${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}${sufijoLocal()}|${hoja}`;
     // Un borrado no se ve en una lectura incremental. Quien borra (o importa) deja la hora en meta/borrados; al abrir, cada dispositivo
     // comprueba ese único documento (1 lectura, memoria de 5 min) y, si su copia es anterior, la rehace completa. Así la lectura completa
     // diaria deja de hacer falta y cada Responsable de local ya no baja ~300 documentos por día.
@@ -295,6 +298,9 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
             FLAGS_USUARIO.forEach((k) => { if (k in d) d[k] = siNo(d[k]); });
             if (d.email != null) d.email = String(d.email).trim().toLowerCase();
             if ("fechaVencimientoAcceso" in d) d.fechaVencimientoAcceso = fechaATimestamp(d.fechaVencimientoAcceso);
+            if ("sucursalesExtra" in d && !Array.isArray(d.sucursalesExtra)) {
+                d.sucursalesExtra = String(d.sucursalesExtra || "").split(",").map((n) => n.trim()).filter(Boolean);
+            }
         }
         if (INCREMENTALES.includes(hoja)) d.modificadoEn = ahora();     // marca para las lecturas incrementales
         if (hoja === "Noticias" && "leidoPor" in d && !Array.isArray(d.leidoPor)) {
