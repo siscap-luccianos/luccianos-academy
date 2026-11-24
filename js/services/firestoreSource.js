@@ -39,7 +39,8 @@ const COLECCIONES = {
     Noticias: "noticias",
     Auditoria: "auditoria",
     Tokens: "tokens",
-    Pedidos: "pedidos",         // altas y bajas que piden los responsables de local y resuelve el Admin
+    Pedidos: "pedidos",         // altas, bajas y transferencias que piden los responsables de local y resuelve el Admin
+    PedidosHistorial: "pedidos", // los ya resueltos (registro): solo lectura, solo Admin
 };
 
 // Hojas con un modelo propio (no "un documento por fila"): Gestión de tareas y Desafío.
@@ -473,6 +474,11 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
                 snap = u.rol === "admin"
                     ? await getDocs(query(col, where("estado", "==", "pendiente")))
                     : await getDocs(query(col, where("pedidoPorEmail", "==", u.email), where("estado", "==", "pendiente")));     // un Capacitador: sus propios pedidos
+                break;
+            case "PedidosHistorial":
+                // El registro de lo que ya se aprobó o rechazó: solo el Admin, y solo cuando abre el historial (hasta 200 documentos).
+                if (u.rol !== "admin") return [];
+                snap = await getDocs(query(col, where("estado", "in", ["aprobado", "rechazado"]), limit(200)));
                 break;
             case "Tokens":
                 // Siempre los de uno mismo: saber QUIÉN tiene push lo da la marca `tienePush` de cada usuario (Admin/Supervisor

@@ -71,7 +71,8 @@ import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
 import { listaDeLocales, localesDelUsuario } from "../services/localActivo.js";
 import { DIAS_ACCESO_INICIAL, fechaHoyISO, sumarDias } from "../services/fechasAcceso.js";
-import { getPedidosPendientes, pedirAlta, pedirBaja } from "../data/pedidos.js";
+import { getPedidosPendientes, pedirAlta, pedirBaja, pedirTransferencia } from "../data/pedidos.js";
+import { localesPropios, motivoSinTransferencia } from "../services/transferencias.js";
 import { SelectorBuscable, bindSelectorBuscable, valorSelectorBuscable } from "../components/selectorBuscable.js";
 import { cursosDeLaPersona, cursoAplicaAPersona } from "../services/alcance.js";
 
@@ -79,6 +80,8 @@ const DIAS_AVISO_VENCIMIENTO = 7;
 
 // Personas del local del Responsable a las que todavía se les puede pedir la baja (las arma Colaboradores() para el botón "− Pedir baja").
 let personasParaBaja = [];
+// Responsable de local de un local PROPIO: nombres de todos los locales propios (destinos posibles de una transferencia). Vacío = no aplica.
+let propiosParaTransferir = [];
 
 function diasEntre(desdeISO, hastaISO) {
     const [y1, m1, d1] = desdeISO.split("-").map(Number);
@@ -310,6 +313,12 @@ function filaAcciones(colaborador, puedeDeshabilitar, puedeEditar, esAdmin) {
         grupos.push({ items: [`<button class="menu-acciones-item" data-pedir-baja="${colaborador.id}" data-nombre="${escaparHtml(colaborador.nombre)}" data-email="${escaparHtml(colaborador.email)}" data-sucursal="${escaparHtml(colaborador.sucursal)}">Pedir baja</button>`] });
     } else if (colaborador._pedirBaja === "pedida") {
         grupos.push({ items: [`<span class="menu-acciones-item" style="opacity:.7;cursor:default">Baja pedida</span>`] });
+    }
+    // Entre locales propios: pide pasar a la persona a otro local (la aprueba el Administrador, junto con el pedido cruzado del otro local).
+    if (colaborador._pedirTransferencia === "si") {
+        grupos.push({ items: [`<button class="menu-acciones-item" data-pedir-transferencia="${colaborador.id}" data-nombre="${escaparHtml(colaborador.nombre)}" data-email="${escaparHtml(colaborador.email)}" data-sucursal="${escaparHtml(colaborador.sucursal)}">Pedir transferencia</button>`] });
+    } else if (colaborador._pedirTransferencia === "pedida") {
+        grupos.push({ items: [`<span class="menu-acciones-item" style="opacity:.7;cursor:default">Transferencia pedida</span>`] });
     }
 
     // "Ver como" — igual criterio que filaAccionesGenerico (tabla de
@@ -788,6 +797,14 @@ export async function Colaboradores() {
         const sucursales = await getSucursales();
         const miLocal = sucursales.find((s) => s.nombre === usuario.sucursal);
         miSupervisor = String(miLocal?.supervisor || "").split(",").map((n) => n.trim()).filter(Boolean).join(", ");
+        // Transferencias: solo entre locales propios. Quien está en una franquicia no ve la opción.
+        const propios = localesPropios(sucursales);
+        const transferenciasPedidas = new Set(pedidosPropios.filter((p) => p.tipo === "transferencia").map((p) => String(p.usuarioId)));
+        propiosParaTransferir = propios.length > 1 ? propios : [];
+        colaboradores.forEach((c) => {
+            const puede = propiosParaTransferir.includes(c.sucursal) && c._pedirBaja !== "" && c.activo === "SI";
+            c._pedirTransferencia = !puede ? "" : transferenciasPedidas.has(String(c.id)) ? "pedida" : "si";
+        });
     } else {
         // Supervisor: puede tener más de un local a cargo (ver
         // getMisLocales, incluye el fallback a su propio
@@ -959,7 +976,7 @@ export async function Colaboradores() {
 
         ${puedePedir && pedidosPropios.length ? `
             <p class="text-sm text-muted" style="margin-top:-6px">
-                Pedidos esperando al Administrador: ${pedidosPropios.map((p) => `<strong>${p.tipo === "alta" ? "Alta" : "Baja"}</strong> de ${escaparHtml(p.nombre)}`).join(" · ")}.
+                Pedidos esperando al Administrador: ${pedidosPropios.map((p) => `<strong>${p.tipo === "alta" ? "Alta" : p.tipo === "transferencia" ? "Transferencia" : "Baja"}</strong> de ${escaparHtml(p.nombre)}${p.tipo === "transferencia" ? ` a ${escaparHtml(String(p.destino).replace("Lucciano's ", ""))}` : ""}`).join(" · ")}.
             </p>
         ` : ""}
 
@@ -1546,6 +1563,9 @@ export function bindColaboradores() {
         } catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); }
         navigate("colaboradores", { replace: true });
     }));
+    document.querySelectorAll("[data-pedir-transferencia]").forEach((btn) => btn.addEventListener("click", () => {
+        abrirModalPedirTransferencia({ id: btn.dataset.pedirTransferencia, nombre: btn.dataset.nombre, email: btn.dataset.email, sucursal: btn.dataset.sucursal });
+    }));
     document.getElementById("btn-pedir-alta")?.addEventListener("click", abrirModalPedirAlta);
     document.getElementById("btn-pedir-baja")?.addEventListener("click", abrirModalPedirBaja);
 
@@ -1862,6 +1882,31 @@ async function abrirModalPedirAlta() {
         navigate("colaboradores", { replace: true });
     });
     if (esCapacitador) bindSelectorBuscable("selector-local");
+}
+
+/** Responsable de local de un local propio: pide pasar a UNA persona de su local a otro local propio. Lo acuerda con el otro responsable y el Admin aprueba los dos pedidos juntos. */
+function abrirModalPedirTransferencia(persona) {
+    const destinos = propiosParaTransferir.filter((n) => n !== persona.sucursal).sort((a, b) => a.localeCompare(b, "es"));
+    if (!destinos.length) { alert("No hay otro local propio al que transferirla."); return; }
+    const modalId = "modal-pedir-transferencia";
+    const contenidoHtml = `
+        <p style="margin:0 0 12px"><strong>${escaparHtml(persona.nombre)}</strong><br><span class="text-sm text-muted">Hoy en ${escaparHtml(persona.sucursal)}</span></p>
+        <label for="selector-destino-buscar">¿A qué local va?</label>
+        ${SelectorBuscable({ id: "selector-destino", placeholder: "Buscar local...", opciones: destinos.map((n) => ({ valor: n, etiqueta: n.replace("Lucciano's ", "") })) })}
+        <p class="text-xs text-muted" style="margin-top:10px">Solo entre locales propios. Acordalo antes con el responsable del otro local: él pide la salida de su persona hacia el tuyo y el Administrador aprueba las dos juntas. Hasta entonces la persona sigue en tu local.</p>
+    `;
+    abrirModal(Modal({ id: modalId, titulo: "Pedir transferencia", contenidoHtml, textoConfirmar: "Enviar pedido" }), modalId, async () => {
+        const destino = valorSelectorBuscable("selector-destino");
+        if (!destino) { alert("Elegí el local de la lista."); return; }
+        const motivo = motivoSinTransferencia(persona.sucursal, destino, propiosParaTransferir);
+        if (motivo) { alert(motivo); return; }
+        try { await pedirTransferencia({ usuarioId: persona.id, nombre: persona.nombre, email: persona.email, sucursal: persona.sucursal, destino }); }
+        catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
+        cerrarModal(modalId);
+        alert("Pedido enviado. El Administrador lo va a revisar.");
+        navigate("colaboradores", { replace: true });
+    });
+    bindSelectorBuscable("selector-destino");
 }
 
 /** Responsable de local: pide la baja de una persona de SU local, elegida de una lista. */
