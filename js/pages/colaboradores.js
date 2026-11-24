@@ -69,7 +69,7 @@ import { Avatar } from "../components/avatar.js";
 import { celdaPct, estadoEvaluacion, progresoCursoDePersona, barraProgreso, leccionesDePersona, kpisSemaforo } from "./reportes.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
-import { listaDeLocales } from "../services/localActivo.js";
+import { listaDeLocales, localesDelUsuario } from "../services/localActivo.js";
 import { DIAS_ACCESO_INICIAL, fechaHoyISO, sumarDias } from "../services/fechasAcceso.js";
 import { getPedidosPendientes, pedirAlta, pedirBaja } from "../data/pedidos.js";
 import { SelectorBuscable, bindSelectorBuscable, valorSelectorBuscable } from "../components/selectorBuscable.js";
@@ -767,7 +767,12 @@ export async function Colaboradores() {
             ? colaboradores.filter((c) => elegidosAdmin.includes(c.sucursal))
             : colaboradores;
     } else if (esEncargado) {
-        colaboradores = await getColaboradoresPorSucursal(usuario.sucursal);
+        // Con más de un local (franquiciado que maneja dos), ve a los equipos de todos juntos, agrupados por local.
+        const localesDelResponsable = localesDelUsuario(usuario);
+        colaboradores = localesDelResponsable.length > 1
+            ? (await getColaboradores()).filter((c) => localesDelResponsable.includes(c.sucursal))
+            : await getColaboradoresPorSucursal(usuario.sucursal);
+        if (localesDelResponsable.length > 1) gruposPorSucursal = localesDelResponsable;
         colaboradoresParaKpis = colaboradores;
         // Sus pedidos pendientes (solo los de su local): sirven para marcar "Baja pedida" y no pedirla dos veces.
         pedidosPropios = await getPedidosPendientes();
@@ -1813,7 +1818,14 @@ async function abrirModalPedirAlta() {
     const modalId = "modal-pedir-alta";
     const esCapacitador = getUsuarioActual().capacitador === true;
     const locales = esCapacitador ? (await getSucursales()).map((s) => s.nombre).sort((a, b) => a.localeCompare(b, "es")) : [];
+    // Un Responsable con dos locales elige para cuál es el alta (2 o 3 opciones: va sin buscador).
+    const susLocales = esCapacitador ? [] : localesDelUsuario(getUsuarioActual());
+    const eligeLocalPropio = susLocales.length > 1;
     const contenidoHtml = `
+        ${eligeLocalPropio ? `
+            <label for="input-pedido-local">Local</label>
+            <select id="input-pedido-local">${susLocales.map((n) => `<option value="${escaparHtml(n)}">${escaparHtml(n.replace("Lucciano's ", ""))}</option>`).join("")}</select>
+        ` : ""}
         ${esCapacitador ? `
             <label for="selector-local-buscar">Local</label>
             ${SelectorBuscable({ id: "selector-local", placeholder: "Buscar local...", opciones: locales.map((n) => ({ valor: n, etiqueta: n.replace("Lucciano's ", "") })) })}
@@ -1833,7 +1845,7 @@ async function abrirModalPedirAlta() {
             ${esCapacitador ? `<option>Responsable de local</option>` : ""}
         </select>
 
-        <p class="text-xs text-muted" style="margin-top:10px">${esCapacitador ? "El Administrador lo revisa y aprueba." : `Se pide para tu local (${escaparHtml(getUsuarioActual().sucursal)}). El Administrador lo revisa y aprueba.`}</p>
+        <p class="text-xs text-muted" style="margin-top:10px">${esCapacitador || eligeLocalPropio ? "El Administrador lo revisa y aprueba." : `Se pide para tu local (${escaparHtml(getUsuarioActual().sucursal)}). El Administrador lo revisa y aprueba.`}</p>
     `;
     abrirModal(Modal({ id: modalId, titulo: "Pedir alta", contenidoHtml, textoConfirmar: "Enviar pedido" }), modalId, async () => {
         const nombre = document.getElementById("input-pedido-nombre").value.trim();
@@ -1841,7 +1853,7 @@ async function abrirModalPedirAlta() {
         const rol = document.getElementById("input-pedido-rol").value;
         if (!nombre || !email) { alert("Completá el nombre y el correo."); return; }
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert(`"${email}" no parece un correo válido (ej: nombre@gmail.com).`); return; }
-        const sucursal = esCapacitador ? valorSelectorBuscable("selector-local") : undefined;
+        const sucursal = esCapacitador ? valorSelectorBuscable("selector-local") : eligeLocalPropio ? document.getElementById("input-pedido-local").value : undefined;
         if (esCapacitador && !sucursal) { alert("Elegí el local de la lista."); return; }
         try { await pedirAlta({ nombre, email, rol, sucursal }); }
         catch (err) { alert(`No se pudo enviar el pedido: ${err.message}`); return; }
@@ -1856,7 +1868,7 @@ async function abrirModalPedirAlta() {
 function abrirModalPedirBaja() {
     if (!personasParaBaja.length) { alert("No hay personas a las que se les pueda pedir la baja (todas ya tienen un pedido o están inactivas)."); return; }
     const modalId = "modal-pedir-baja";
-    const verLocal = getUsuarioActual().capacitador === true;       // un Responsable de local ve solo su local: no hace falta repetirlo
+    const verLocal = getUsuarioActual().capacitador === true || localesDelUsuario(getUsuarioActual()).length > 1;       // con un solo local no hace falta repetirlo
     const contenidoHtml = `
         <label for="selector-baja-buscar">Persona</label>
         ${SelectorBuscable({

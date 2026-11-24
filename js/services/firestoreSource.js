@@ -22,6 +22,7 @@
 import { cicloActual } from "./gestionCiclo.js";
 import { parsearFirmaSubitem, serializarFirmaSubitem } from "./subitems.js";
 import { localesDeSupervisor } from "./supervisores.js";
+import { localesDelUsuario } from "./localActivo.js";
 
 // Hojas de contenido casi estático: un documento "paquete" por hoja, contenido/{hoja}.items
 const PAQUETES = [
@@ -187,9 +188,7 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
     let ignorarCopiasAntesDe = 0;          // botón de actualizar: ninguna copia anterior a este instante vale
     const ignorarHojaAntesDe = {};         // escritura propia en una hoja: ninguna copia anterior de esa hoja vale
     let mostrandoDatosViejos = false;
-    // Quien gestiona más de un local baja datos distintos en cada uno: la copia guardada lleva también el local en el que está.
-    const sufijoLocal = () => { const u = getUsuario(); return u && Array.isArray(u.sucursalesExtra) && u.sucursalesExtra.length ? `|${u.sucursal || ""}` : ""; };
-    const claveCopia = (hoja) => `cp|${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}${sufijoLocal()}|${hoja}`;
+        const claveCopia = (hoja) => `cp|${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
     const copiable = (hoja) => !!almacen && cacheMs > 0 && COPIABLES.includes(hoja);
     function frescuraDe(hoja) {
         if (hoja === "Sucursales") return FRESCURA_SUCURSALES_MS;       // de acá sale "qué locales supervisa cada uno": una corrección tiene que llegar rápido
@@ -204,7 +203,7 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         try { await almacen.guardar(claveCopia(hoja), { filas, guardadoEn: ahora(), extra }); } catch (err) { /* sin copia */ }
     }
     const copiaVale = (hoja, c) => c.guardadoEn > ignorarCopiasAntesDe && c.guardadoEn > (ignorarHojaAntesDe[hoja] || 0) && ahora() - c.guardadoEn < frescuraDe(hoja) && ahora() >= c.guardadoEn;
-    const claveAlmacen = (hoja) => `${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}${sufijoLocal()}|${hoja}`;
+    const claveAlmacen = (hoja) => `${db && db.app && db.app.options ? db.app.options.projectId : "?"}|${String(getUsuario() && getUsuario().email || "").toLowerCase()}|${hoja}`;
     // Un borrado no se ve en una lectura incremental. Quien borra (o importa) deja la hora en meta/borrados; al abrir, cada dispositivo
     // comprueba ese único documento (1 lectura, memoria de 5 min) y, si su copia es anterior, la rehace completa. Así la lectura completa
     // diaria deja de hacer falta y cada Responsable de local ya no baja ~300 documentos por día.
@@ -341,7 +340,9 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
             f.pedidoPorEmail = u.email;
             f.pedidoPorNombre = u.nombre || "";
             // Un Capacitador pide para el local que elige; un Responsable de local, siempre para el suyo (lo que mande la pantalla se ignora).
-            f.sucursal = u.capacitador === true ? String(f.sucursal || "").trim() : String(u.sucursal || "").trim();
+            // Un Responsable de local con dos locales elige para cuál; solo puede ser uno de los suyos.
+            const elegido = String(f.sucursal || "").trim();
+            f.sucursal = u.capacitador === true ? elegido : (localesDelUsuario(u).includes(elegido) ? elegido : String(u.sucursal || "").trim());
             if (!f.sucursal) throw new Error("Falta el local del pedido.");
             f.estado = "pendiente";
             f.creadoEn = ahora();
@@ -376,6 +377,14 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         try { extra = getLocalesExtra() || []; } catch (err) { /* sin preferencia guardada */ }
         const locales = [...new Set([...localesDeSupervisor(u, sucursales), String(u.sucursal || "").trim(), ...extra.map((n) => String(n).trim())].filter(Boolean))].sort();
         return locales.length ? { locales, firma: `sup:${locales.join("|")}` } : null;
+    }
+    // Un Responsable de local con locales extra baja Usuarios, Asignaciones y Resultados de TODOS sus locales (no solo del que tiene
+    // elegido en el menú): así ve a los dos equipos juntos. Mismo mecanismo que el Supervisor.
+    function alcanceDeResponsable(hoja) {
+        const u = yo();
+        if (esGestion(u) || !u.encargado || !["Usuarios", "Asignaciones", "Resultados"].includes(hoja)) return null;
+        const locales = localesDelUsuario(u).sort();
+        return locales.length > 1 ? { locales, firma: `resp:${locales.join("|")}` } : null;
     }
     // Documentos de una colección acotada a locales: `where in` admite hasta 30 valores por consulta.
     async function docsDeLocales(col, locales, extra = []) {
@@ -432,7 +441,7 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
         const col = collection(db, nombre);
         const gestion = esGestion(u);
         const sucEncargado = !gestion && u.encargado ? String(u.sucursal || "").trim() : "";
-        const alcance = gestion ? await alcanceDeSupervisor(hoja) : null;
+        const alcance = gestion ? await alcanceDeSupervisor(hoja) : alcanceDeResponsable(hoja);
         if (almacen && INCREMENTALES.includes(hoja) && (gestion || sucEncargado)) {
             try { return await leerIncremental(hoja, sucEncargado || null, alcance); }
             catch (err) { /* sin copia o consulta rechazada: se cae a la lectura completa de siempre */ }
@@ -457,11 +466,13 @@ export function crearFirestoreSource({ db, sdk, getUsuario, ahora = () => Date.n
                 break;
             case "Pedidos":
                 // Solo los pendientes (los resueltos no se vuelven a bajar): el Admin ve los de toda la red; un Responsable de local, los de su local.
+                if (u.rol !== "admin" && u.capacitador !== true) {
+                    // Un Responsable de local con dos locales ve los pedidos de los dos.
+                    return (await docsDeLocales(col, localesDelUsuario(u), [where("estado", "==", "pendiente")])).map((d) => desdeFirestore(hoja, d.data(), d.id));
+                }
                 snap = u.rol === "admin"
                     ? await getDocs(query(col, where("estado", "==", "pendiente")))
-                    : u.capacitador === true
-                        ? await getDocs(query(col, where("pedidoPorEmail", "==", u.email), where("estado", "==", "pendiente")))     // sus propios pedidos
-                        : await getDocs(query(col, where("sucursal", "==", String(u.sucursal || "").trim()), where("estado", "==", "pendiente")));
+                    : await getDocs(query(col, where("pedidoPorEmail", "==", u.email), where("estado", "==", "pendiente")));     // un Capacitador: sus propios pedidos
                 break;
             case "Tokens":
                 // Siempre los de uno mismo: saber QUIÉN tiene push lo da la marca `tienePush` de cada usuario (Admin/Supervisor
