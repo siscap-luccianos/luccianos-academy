@@ -13,6 +13,7 @@ import { Table } from "../components/table.js";
 import { EmptyState } from "../components/emptyState.js";
 import { getPedidosPendientes, getPedidosResueltos, resolverPedido } from "../data/pedidos.js";
 import { getUsuarios, crearUsuario, actualizarUsuario } from "../data/usuarios.js";
+import { localesDelUsuario } from "../services/localActivo.js";
 import { getSucursales } from "../data/sucursales.js";
 import { invalidar } from "../services/dataSource.js";
 import { HOJAS } from "../config.js";
@@ -157,7 +158,9 @@ async function aprobar(id) {
     } else if (p.tipo === "transferencia") {
         if (aviso) throw new Error(aviso);
         // Solo entre locales propios: se vuelve a controlar acá, no solo en la pantalla del responsable.
-        const motivo = motivoSinTransferencia(p.sucursal, p.destino, localesPropios(await getSucursales()));
+        // Valen los locales propios y los que gestiona quien lo pidió (se mira en su ficha, no en lo que mande la pantalla).
+        const quienPidio = usuarios.find((u) => String(u.email).toLowerCase() === p.pedidoPorEmail);
+        const motivo = motivoSinTransferencia(p.sucursal, p.destino, localesPropios(await getSucursales()), quienPidio ? localesDelUsuario(quienPidio) : []);
         if (motivo) throw new Error(motivo);
         await actualizarUsuario(p.usuarioId, { sucursal: p.destino });     // también le pasa su historial al local nuevo
         registrarEvento(admin.id, "transferir_colaborador", `${p.nombre}: de ${p.sucursal} a ${p.destino} (pedido por ${p.pedidoPorNombre || p.pedidoPorEmail})`);
