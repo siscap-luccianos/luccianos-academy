@@ -69,6 +69,7 @@ import { Avatar } from "../components/avatar.js";
 import { celdaPct, estadoEvaluacion, progresoCursoDePersona, barraProgreso, leccionesDePersona, kpisSemaforo } from "./reportes.js";
 import { exportarAPdf, membreteHtml } from "../services/exportarPdf.js";
 import { escaparHtml } from "../services/html.js";
+import { renombrarLocalReal } from "../services/google.js";
 import { listaDeLocales, localesDelUsuario } from "../services/localActivo.js";
 import { DIAS_ACCESO_INICIAL, fechaHoyISO, sumarDias } from "../services/fechasAcceso.js";
 import { getPedidosPendientes, pedirAlta, pedirBaja, pedirTransferencia } from "../data/pedidos.js";
@@ -80,6 +81,8 @@ const DIAS_AVISO_VENCIMIENTO = 7;
 
 // Personas del local del Responsable a las que todavía se les puede pedir la baja (las arma Colaboradores() para el botón "− Pedir baja").
 let personasParaBaja = [];
+// Admin: nombres de los locales que existen (para detectar gente cargada con un nombre de local que ya no existe).
+let localesExistentes = [];
 // Responsable de local de un local PROPIO: nombres de todos los locales propios (destinos posibles de una transferencia). Vacío = no aplica.
 let propiosParaTransferir = [];    // todos los locales a los que podría mandar a alguien (propios + los que gestiona él)
 let propiosDeLaRed = [];          // solo los locales propios
@@ -754,6 +757,8 @@ export async function Colaboradores() {
         // Supervisores y Admins salen del mismo getUsuarios().
         const todosLosUsuarios = await getUsuarios();
         usuariosClaveRota = todosLosUsuarios.filter((u) => u.claveDoc && u.claveDoc !== String(u.email || "").trim().toLowerCase());
+        // Locales que existen de verdad: un grupo con otro nombre es gente cargada con un nombre de local viejo (ver más abajo).
+        localesExistentes = (await getSucursales()).map((s) => s.nombre);
         colaboradores = todosLosUsuarios.filter((u) => u.rol === "colaborador");
         supervisores = todosLosUsuarios.filter((u) => u.rol === "supervisor");
         admins = todosLosUsuarios.filter((u) => u.rol === "admin");
@@ -938,9 +943,18 @@ export async function Colaboradores() {
             // data-sucursal-seccion: ver filtro de local más abajo (solo
             // Capacitador, que ve toda la red y necesita poder acotar la
             // vista a un local puntual en vez de scrollear todos juntos).
+            // Admin: si el nombre no es de ningún local existente (se renombró el local y la gente quedó con el nombre viejo),
+            // se avisa y se ofrece pasarlos a un local existente — mueve también su progreso, pedidos y tareas.
+            const huerfano = esAdmin && localesExistentes.length && !localesExistentes.includes(nombreSucursal);
             return `
-                <div class="section" data-sucursal-seccion="${nombreSucursal}">
-                    <h3>${nombreSucursal} <span class="text-sm text-muted seccion-conteo">(${delGrupo.length})</span></h3>
+                <div class="section" data-sucursal-seccion="${escaparHtml(nombreSucursal)}">
+                    <h3>${escaparHtml(nombreSucursal)} <span class="text-sm text-muted seccion-conteo">(${delGrupo.length})</span></h3>
+                    ${huerfano ? `
+                        <div class="aviso-local-huerfano">
+                            <span>⚠ Este nombre de local ya no existe en Locales (¿se le cambió el nombre?). Estas personas quedaron con el nombre viejo.</span>
+                            <button class="btn btn-primary" type="button" data-pasar-local="${escaparHtml(nombreSucursal)}">Pasar a un local existente</button>
+                        </div>
+                    ` : ""}
                     ${Table(columnasTabla, filas)}
                 </div>
             `;
@@ -1574,6 +1588,7 @@ export function bindColaboradores() {
     document.querySelectorAll("[data-pedir-transferencia]").forEach((btn) => btn.addEventListener("click", () => {
         abrirModalPedirTransferencia({ id: btn.dataset.pedirTransferencia, nombre: btn.dataset.nombre, email: btn.dataset.email, sucursal: btn.dataset.sucursal });
     }));
+    document.querySelectorAll("[data-pasar-local]").forEach((btn) => btn.addEventListener("click", () => abrirModalPasarLocal(btn.dataset.pasarLocal)));
     document.getElementById("btn-pedir-alta")?.addEventListener("click", abrirModalPedirAlta);
     document.getElementById("btn-pedir-baja")?.addEventListener("click", abrirModalPedirBaja);
     document.getElementById("btn-pedir-transferencia")?.addEventListener("click", () => abrirModalPedirTransferencia(null));
@@ -1934,6 +1949,28 @@ function abrirModalPedirTransferencia(personaFija) {
     });
     if (!personaFija) bindSelectorBuscable("selector-transf-persona");
     bindSelectorBuscable("selector-destino");
+}
+
+/** Admin: pasa todo lo cargado con un nombre de local que ya no existe (personas, progreso, pedidos, tareas, contenido) a un local existente. */
+function abrirModalPasarLocal(nombreViejo) {
+    const modalId = "modal-pasar-local";
+    const opciones = [...localesExistentes].sort((a, b) => a.localeCompare(b, "es")).map((n) => ({ valor: n, etiqueta: n.replace("Lucciano's ", "") }));
+    const contenidoHtml = `
+        <p style="margin:0 0 12px">Todo lo cargado como <strong>${escaparHtml(nombreViejo)}</strong> (personas, su progreso, pedidos y tareas) pasa al local que elijas.</p>
+        <label for="selector-pasar-local-buscar">Local de destino</label>
+        ${SelectorBuscable({ id: "selector-pasar-local", placeholder: "Buscar local...", opciones })}
+    `;
+    abrirModal(Modal({ id: modalId, titulo: "Pasar a un local existente", contenidoHtml, textoConfirmar: "Pasar" }), modalId, async () => {
+        const destino = valorSelectorBuscable("selector-pasar-local");
+        if (!destino) { alert("Elegí el local de la lista."); return; }
+        if (!confirm(`¿Pasar todo lo de "${nombreViejo}" a "${destino}"?`)) return;
+        const r = await renombrarLocalReal(nombreViejo, destino);
+        if (!r || r.ok === false) { alert(`No se pudo: ${(r && r.error) || "error desconocido"}`); return; }
+        registrarEvento(getUsuarioActual().id, "editar_local", `Local viejo ${nombreViejo} pasado a ${destino}`);
+        cerrarModal(modalId);
+        navigate("colaboradores", { replace: true });
+    });
+    bindSelectorBuscable("selector-pasar-local");
 }
 
 /** Responsable de local: pide la baja de una persona de SU local, elegida de una lista. */

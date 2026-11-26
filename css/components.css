@@ -8596,3 +8596,21 @@ html[dir="rtl"] .form-seccion select{
     .manual-admin .btn{ flex:1; }
     .manual-archivos .btn span{ max-width:none; }
 }
+
+/* Colaboradores (Admin): grupo de gente con un nombre de local que ya no existe. */
+.aviso-local-huerfano{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    margin:6px 0 14px;
+    padding:14px 18px;
+    border-radius:14px;
+    background:var(--warning-soft);
+    border:1px solid var(--warning);
+    color:var(--warning);
+    font-size:14px;
+    line-height:1.4;
+}
+.aviso-local-huerfano .btn{ width:auto; min-height:40px; padding:0 16px; white-space:nowrap; }
